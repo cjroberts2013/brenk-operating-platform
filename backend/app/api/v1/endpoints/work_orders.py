@@ -15,10 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_async_db
-from app.models.work_order import WorkOrder
+from app.models.work_order import WorkOrder, WorkOrderNote
 from app.schemas.work_order import (
     WorkOrderDetail,
     WorkOrderListResponse,
+    WorkOrderNoteRef,
     WorkOrderSummary,
 )
 
@@ -118,3 +119,31 @@ async def get_work_order(
             detail=f"work order {work_order_id} not found",
         )
     return WorkOrderDetail.model_validate(wo)
+
+
+@router.get("/{work_order_id}/notes", response_model=list[WorkOrderNoteRef])
+async def list_work_order_notes(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> list[WorkOrderNoteRef]:
+    """List notes for a single work order, oldest first.
+
+    Returns 404 if the work order itself doesn't exist. Returns an empty
+    list (not 404) if the WO exists but has no notes.
+    """
+    wo_exists = (
+        await db.execute(select(WorkOrder.id).where(WorkOrder.id == work_order_id))
+    ).scalar_one_or_none()
+    if wo_exists is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"work order {work_order_id} not found",
+        )
+
+    stmt = (
+        select(WorkOrderNote)
+        .where(WorkOrderNote.work_order_id == work_order_id)
+        .order_by(WorkOrderNote.note_number.asc().nullslast(), WorkOrderNote.id.asc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [WorkOrderNoteRef.model_validate(row) for row in rows]

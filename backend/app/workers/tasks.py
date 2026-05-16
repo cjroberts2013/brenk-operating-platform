@@ -7,6 +7,9 @@ with ServiceChannel. Task bodies are thin wrappers — real logic lives in
 
 import structlog
 
+from app.db.session import AsyncSessionLocal
+from app.services.servicechannel.client import ServiceChannelClient
+from app.services.sync.notes import sync_notes_for_sc_work_order_id
 from app.services.sync.work_orders import sync_all_work_orders
 from app.workers.app import procrastinate_app
 
@@ -35,12 +38,20 @@ async def scheduled_sync_work_orders(timestamp: int) -> dict:
 
 @procrastinate_app.task(name="sync_work_order_detail", queue="default")
 async def sync_work_order_detail(sc_work_order_id: int) -> dict:
-    """Sync the full detail (notes, attachments) for a single work order.
+    """Force-resync the notes thread for a single work order.
 
-    TODO: implement once we settle the notes-sync strategy.
+    The WO must already exist locally (run a WO sync first). Use this
+    task to refresh notes on demand, independent of the count-delta
+    trigger in the periodic sync.
+
+    TODO: extend to attachments once SC exposes a working endpoint.
     """
     logger.info("sync_work_order_detail task triggered", sc_work_order_id=sc_work_order_id)
-    return {"status": "not_implemented", "sc_work_order_id": sc_work_order_id}
+    client = ServiceChannelClient()
+    async with AsyncSessionLocal() as session:
+        count = await sync_notes_for_sc_work_order_id(session, client, sc_work_order_id)
+        await session.commit()
+    return {"sc_work_order_id": sc_work_order_id, "notes_synced": count}
 
 
 @procrastinate_app.task(name="sync_vendors", queue="default")

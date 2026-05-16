@@ -126,3 +126,26 @@ async def test_detail_404_for_unknown_id(client: httpx.AsyncClient) -> None:
 async def test_invalid_page_size_rejected(client: httpx.AsyncClient) -> None:
     response = await client.get("/api/v1/work-orders/", params={"page_size": 9999})
     assert response.status_code == 422
+
+
+async def test_notes_endpoint_returns_list(client: httpx.AsyncClient) -> None:
+    """The /notes endpoint returns a list for an existing WO. Empty list is
+    fine — we only assert shape, not that any notes have been synced yet."""
+    listed = await _list(client, page_size=1)
+    if listed["total"] == 0:
+        pytest.skip("dev DB has no work orders")
+    wo_id = listed["items"][0]["id"]
+
+    response = await client.get(f"/api/v1/work-orders/{wo_id}/notes")
+    assert response.status_code == 200, response.text
+    notes = response.json()
+    assert isinstance(notes, list)
+    if notes:
+        first = notes[0]
+        for key in ("id", "note_data", "source", "action_required"):
+            assert key in first
+
+
+async def test_notes_endpoint_404_for_unknown_wo(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v1/work-orders/999999999/notes")
+    assert response.status_code == 404

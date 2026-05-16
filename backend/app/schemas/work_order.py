@@ -122,3 +122,20 @@ class WorkOrderListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class WorkOrderNoteRef(_OrmModel):
+    """A note attached to a work order. Returned by /work-orders/{id}/notes."""
+
+    id: int
+    sc_note_id: int | None
+    note_number: int | None
+    note_data: str
+    note_type: str | None
+    action_required: bool
+    is_pinned: bool
+    is_attachment_note: bool
+    created_by: str | None
+    company_name: str | None
+    created_at_sc: datetime | None
+    source: str
