@@ -1,0 +1,19 @@
+# Fly.io configuration for the Procrastinate worker.
+# Apply with: fly deploy --config fly.worker.toml
+
+app = "brenk-platform-worker"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_ENV = "production"
+
+[processes]
+  worker = "procrastinate --app=app.workers.app worker --queues=default"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
