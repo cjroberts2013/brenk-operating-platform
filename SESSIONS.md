@@ -8,6 +8,120 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 16, 2026 (evening) — ~2.5 hours
+
+This session closed out the Phase 1 backend. With the work below committed,
+every backend deliverable from the Phase 1 plan is functionally complete.
+The remaining open item is the Next.js dashboard scaffold.
+
+### Accomplishments
+
+**Recency-filter revisit (commit `5b32d7e`):**
+- Charles flagged the concern that the scheduled sync skipping all 327
+  sandbox records (because the data is older than the 24-hour lookback)
+  would silently drop long-lived in-progress WOs in production.
+- Decided to **drop the filter entirely**, not redesign it. At Brenk's
+  scale (~8 WOs/day, ~327 sandbox total), full pagination every 5
+  minutes costs ~7 SC API requests per tick — trivially cheap. The
+  upserter is already idempotent, so resyncing unchanged WOs is a
+  no-op.
+- Renamed `sync_recent_work_orders(lookback_hours)` →
+  `sync_all_work_orders()`. Dropped the cutoff/skipped logic and the
+  `lookback_hours` parameter from both worker tasks.
+- Removed dead config: `SC_SYNC_INTERVAL_SECONDS` (cron is hardcoded in
+  the `@periodic` decorator) and `SC_SYNC_LOOKBACK_HOURS` (filter is
+  gone).
+- End-to-end verified: the full sweep imported the 160 previously-skipped
+  records, taking the DB from 167 → 327 WOs, 46 → 54 locations,
+  21 → 27 trades. `wo_status_history` stayed at 0 — confirms the
+  upserter correctly no-op'd the 167 already-synced records.
+
+**Work-order notes sync (commit `73ec534`):**
+- New `app/services/sync/notes.py` with three building blocks:
+  `upsert_note` (keyed on `sc_note_id`), `sync_notes_for_work_order`
+  (fetches + upserts the full notes thread), and
+  `sync_notes_for_sc_work_order_id` (looks up the WO by its SC id then
+  delegates).
+- Smart trigger logic in the orchestrator: only fetch notes for a WO
+  when the incoming `notes_count` from the list payload exceeds the
+  actual count of `wo_notes` rows we have stored. **Critical bug caught
+  mid-implementation** — initially compared against the WO's
+  denormalized `notes_count` column, which would have always matched and
+  never triggered backfill. Comparing against actual stored row count
+  is the correct semantic.
+- `sync_work_order_detail` Procrastinate task is no longer a stub — it's
+  a thin wrapper around `sync_notes_for_sc_work_order_id`, suitable for
+  ad-hoc "refresh notes for this WO" triggers later from the UI.
+- New `WorkOrderNoteRef` schema + `GET /api/v1/work-orders/{id}/notes`
+  endpoint, ordered by note number with deterministic fallback.
+- End-to-end verified: **2,930 notes backfilled** across all 327 WOs in
+  one ~16-minute run. Sustained 4 SC throttle events (40 req/min sandbox
+  cap), all handled cleanly via the existing `Retry-After`
+  wait-and-retry path. First real-world exercise of that code path.
+
+**Supabase JWT auth on the API (commit `6e5dc4b`):**
+- New `app/core/auth.py`: `CurrentUser` model + `get_current_user`
+  FastAPI dependency. Validates HS256-signed Supabase JWTs using
+  `SUPABASE_JWT_SECRET`, checks `aud="authenticated"` and `exp`,
+  surfaces `sub`/`email`/`role` from the claims.
+- Uses FastAPI's `HTTPBearer` security scheme — Swagger UI at `/docs`
+  now has an "Authorize" button for interactive testing.
+- Applied at the v1 router level via
+  `APIRouter(dependencies=[Depends(get_current_user)])` so every
+  current and future v1 endpoint is protected in one place.
+  Top-level `/health` stays open for Fly.io probes.
+- New `tests/integration/conftest.py` with a `mint_jwt()` helper that
+  forges Supabase-shaped JWTs signed with the same secret the backend
+  verifies against. Tests run end-to-end without a real Supabase Auth
+  round-trip.
+- 6 new auth tests covering: missing header, malformed bearer, expired
+  token, wrong audience, wrong signature, `/health`-stays-open.
+- Updated existing endpoint tests to authenticate (otherwise they'd
+  all 401 after this change).
+
+### Decisions & Observations
+
+- **Drop, don't refactor.** The recency filter felt like clever
+  optimization but at our scale it was solving a non-problem. Removing
+  it was a net-negative-LoC win.
+- **Compare against actual DB state, not denormalized counts.** When
+  computing whether to re-fetch notes, what matters is what we actually
+  have stored, not what we thought we had. The `WorkOrder.notes_count`
+  column is a denormalized SC-reported value, useful for the API
+  response but not for "do we need to fetch more notes?" decisions.
+- **SC sandbox throttling kicked in for the first time.** 4 throttle
+  events during the notes backfill. Our client's `Retry-After`
+  wait-and-retry path (added back in Phase 1 scaffolding, never
+  previously exercised under load) worked flawlessly — every throttled
+  request retried after the prescribed wait and succeeded. Good to
+  know that path is solid before production volume.
+- **Router-level auth dependency is the right idiom.** Decorating each
+  endpoint with `Depends(get_current_user)` would be redundant boilerplate
+  that's easy to forget on a new endpoint. Setting it on the
+  `APIRouter` itself means new endpoints inherit auth by default and
+  exempting one (like `/health`) is the explicit, conspicuous action.
+- **`HTTPBearer` Swagger integration is a nice touch.** Free
+  developer-ergonomics win — you click "Authorize" in the docs UI,
+  paste a JWT, and every subsequent "Try it out" includes it. Useful
+  for ad-hoc exploration without writing a script.
+
+### Up Next
+
+1. **Next.js dashboard scaffold** — the last open Phase 1 deliverable.
+   Multi-session piece of work. First commit: initialize the Next.js
+   project, set up Tailwind, get a "Hello world" page rendering, wire
+   up the Supabase JS client for auth.
+2. **Pre-existing ruff errors** (~10 across `config.py`,
+   `migrations/env.py`, and the autogenerated initial migration). Small
+   focused cleanup pass.
+3. **Push to origin** — branch is now 8 commits ahead. We've been
+   building offline; before the next session it's worth pushing so
+   GitHub has the work.
+4. **`LICENSE` leftover merge-conflict markers** — still uncommitted in
+   the working tree. Tiny separate fix when convenient.
+
+---
+
 ## Session: May 16, 2026 (afternoon, continued) — ~2.5 hours
 
 ### Accomplishments
