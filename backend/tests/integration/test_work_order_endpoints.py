@@ -25,14 +25,18 @@ from app.main import app
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[httpx.AsyncClient]:
-    """ASGI test client with a NullPool-backed DB engine.
+async def client(auth_headers: dict[str, str]) -> AsyncGenerator[httpx.AsyncClient]:
+    """Authenticated ASGI test client with a NullPool-backed DB engine.
 
     The module-level async engine in app.db.session caches connections tied
     to the event loop of the first test, which then go stale on subsequent
     tests' loops. Overriding get_async_db with a per-test engine using
     NullPool sidesteps that — each request opens (and closes) its own
     asyncpg connection.
+
+    `auth_headers` comes from tests/integration/conftest.py and contains a
+    freshly-minted Supabase-shaped JWT, so every request issued by this
+    client is automatically authenticated.
     """
     settings = get_settings()
     test_engine = create_async_engine(settings.DATABASE_URL_ASYNC, poolclass=NullPool)
@@ -52,6 +56,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient]:
         async with httpx.AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",
+            headers=auth_headers,
         ) as ac:
             yield ac
     finally:
