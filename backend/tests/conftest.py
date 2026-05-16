@@ -24,3 +24,10 @@ def sample_notes_response() -> dict:
     if not path.exists():
         pytest.skip("Sample notes fixture not present yet")
     return json.loads(path.read_text())
+
+
+@pytest.fixture
+def sample_work_order_list() -> list[dict]:
+    """A scrubbed work-order list response (mirrors the /v3/workorders shape)."""
+    path = FIXTURES_DIR / "workorder_list.json"
+    return json.loads(path.read_text())

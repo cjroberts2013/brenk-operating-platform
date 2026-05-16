@@ -1,0 +1,97 @@
+[
+  {
+    "Id": 1000000001,
+    "Number": "1000000001",
+    "PurchaseNumber": "1000000001",
+    "Subscriber": {
+      "Id": 9990001,
+      "ShortName": "ACME",
+      "Name": "ACME CORP",
+      "IsOutsourcedWorkOn": false
+    },
+    "Provider": {
+      "Id": 9990003,
+      "Name": "Test Provider, LLC",
+      "DoNotDispatch": false,
+      "Phone": "+15555550100",
+      "IsInternal": false,
+      "IsOnOffShoreFeatureEnabled": false
+    },
+    "Location": {
+      "Id": 9990002,
+      "SubscriberId": 0,
+      "StoreId": "0001",
+      "Name": "0001 ACME TX TESTVILLE FAKE ST",
+      "ShortName": "0001 ACME TX TESTVILLE FAKE ST",
+      "Latitude": 30.5,
+      "Longitude": -97.5,
+      "Address1": "1 Fake St",
+      "City": "Testville",
+      "State": "TX",
+      "Zip": "78000",
+      "TimeZoneInfoId": 389,
+      "Notes": [],
+      "TimeShiftToEST": 0,
+      "AddressTypeId": 0,
+      "IsInternational": false
+    },
+    "LocationId": 0,
+    "Status": {
+      "Primary": "IN PROGRESS",
+      "Extended": "DISPATCH CONFIRMED",
+      "CanCreateInvoice": false
+    },
+    "Caller": "Test Caller",
+    "CreatedBy": ".",
+    "CallDate": "2026-05-08T21:39:50Z",
+    "CallDate_DTO": "2026-05-08T16:39:50-05:00",
+    "Priority": "Same day - Biz Hrs",
+    "Trade": "ROOFING",
+    "TradeId": 5001,
+    "ApprovalCode": "0000",
+    "ScheduledDate": "2026-05-09T05:47:58.427Z",
+    "ScheduledDate_DTO": "2026-05-09T00:47:58.427-05:00",
+    "ExpirationDate": "2026-05-09T05:47:58.427Z",
+    "UpdatedDate": "2026-05-08T22:44:31.3040379Z",
+    "CreatedDate": "2026-05-08T21:41:22.6885071Z",
+    "Description": "Roof leak in unit A1. Test description.",
+    "CategoryId": 10192,
+    "Category": "REPAIR",
+    "Nte": 750.0,
+    "Currency": {
+      "Id": 1,
+      "AlphabeticalCode": "USD",
+      "Rate": 0.0
+    },
+    "ProblemCode": "OTHER ISSUES",
+    "AssetCount": 0,
+    "Attachments": {
+      "Count": {
+        "Total": 2,
+        "Own": 0
+      }
+    },
+    "Notes": {
+      "WorkOrderId": 0,
+      "Last": {
+        "Id": 9990004,
+        "DocumentId": "00000000-0000-0000-0000-000000000001",
+        "Number": 6,
+        "NoteData": "Status has been changed from <b>OPEN</b> to <b>IN PROGRESS/DISPATCH CONFIRMED</b>.",
+        "DateCreated": "2026-05-08T22:44:31.2167096Z",
+        "ActionRequired": false,
+        "CreatedBy": "Test User"
+      },
+      "Count": {
+        "Total": 6,
+        "Own": 2
+      }
+    },
+    "IsCheckInDenied": false,
+    "IsInvoiced": false,
+    "IsExpired": true,
+    "HasWorkActivity": false,
+    "AutoComplete": false,
+    "AutoInvoice": false
+  }
+]
