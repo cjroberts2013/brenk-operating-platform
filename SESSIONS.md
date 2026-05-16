@@ -14,6 +14,23 @@ This session closed out the Phase 1 backend. With the work below committed,
 every backend deliverable from the Phase 1 plan is functionally complete.
 The remaining open item is the Next.js dashboard scaffold.
 
+At the end of the session, Charles and Claude held a dashboard-planning
+conversation (no code written) that settled scope, page set, and the
+read-write split. Captured in the new **Dashboard Plan** section of
+CLAUDE.md. Highlights:
+
+- Tailwind UI "Dark sidebar with header" shell as the foundation
+  (reference code stashed at `docs/design/dashboard-shell.tsx`)
+- Five sidebar items: Dashboard, Work Orders, Vendors, Reports, Settings
+- Pages to build in order: shell+login → WO list → WO detail → Vendors
+  CRUD → kanban → "needs attention" home → per-vendor calendar
+- Color-code statuses consistently across all views
+- **Phase 1 writes go to Brenk-internal fields only.** SC write-through
+  deferred to Phase 1.5 / early Phase 3 (needs an SC write-API
+  exploration session first — those endpoints are unmapped)
+- Open question for next session: does Charles have an existing vendor
+  list (spreadsheet/contacts) to import, or start empty?
+
 ### Accomplishments
 
 **Recency-filter revisit (commit `5b32d7e`):**
