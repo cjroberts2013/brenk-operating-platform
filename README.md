@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Brenk Operating Platform
 
 A custom operations automation platform for Brenk Facility Services, LLC. Integrates
@@ -49,7 +48,3 @@ brenk-operating-platform/
 ## License
 
 Proprietary. © Brenk Facility Services, LLC.
-=======
-# brenk-operating-platform
-Brenk Facility Maintenance operating platform
->>>>>>> 523a7220c2295fda2a8246b2217a93d13da29aab
