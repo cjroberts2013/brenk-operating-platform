@@ -50,8 +50,6 @@ class Settings(BaseSettings):
     SC_CLIENT_SECRET: str
     SC_USERNAME: str
     SC_PASSWORD: str
-    SC_SYNC_INTERVAL_SECONDS: int = 300
-    SC_SYNC_LOOKBACK_HOURS: int = 24
     SC_REQUEST_TIMEOUT_SECONDS: int = 30
     SC_MAX_RETRIES: int = 3
 

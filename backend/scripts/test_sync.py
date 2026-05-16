@@ -19,7 +19,7 @@ from app.models.work_order import (
     WorkOrder,
     WorkOrderStatusHistory,
 )
-from app.services.sync.work_orders import sync_recent_work_orders
+from app.services.sync.work_orders import sync_all_work_orders
 
 
 async def _count(model) -> int:
@@ -37,11 +37,10 @@ async def main() -> None:
 
     print()
     print("=" * 60)
-    print("Running sync_recent_work_orders(lookback_hours=720)")
+    print("Running sync_all_work_orders()")
     print("=" * 60)
-    summary = await sync_recent_work_orders(lookback_hours=720)
+    summary = await sync_all_work_orders()
     print(f"  fetched:  {summary['fetched']}")
-    print(f"  skipped:  {summary['skipped']}")
     print(f"  upserted: {summary['upserted']}")
     print(f"  errors:   {len(summary['errors'])}")
     for err in summary["errors"][:5]:

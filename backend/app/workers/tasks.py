@@ -1,31 +1,23 @@
 """Procrastinate task definitions.
 
-These are the recurring background jobs that keep our database in sync with
-ServiceChannel. Task bodies are thin wrappers — real logic lives in
+These are the recurring background jobs that keep our database in sync
+with ServiceChannel. Task bodies are thin wrappers — real logic lives in
 `app.services.sync`.
 """
 
 import structlog
 
-from app.core.config import get_settings
-from app.services.sync.work_orders import sync_recent_work_orders
+from app.services.sync.work_orders import sync_all_work_orders
 from app.workers.app import procrastinate_app
 
 logger = structlog.get_logger(__name__)
-_settings = get_settings()
 
 
 @procrastinate_app.task(name="sync_work_orders", queue="default")
-async def sync_work_orders(lookback_hours: int = 1) -> dict:
-    """Sync recently updated work orders from ServiceChannel.
-
-    Manual / on-demand task. The recurring schedule lives on
-    `scheduled_sync_work_orders` below — keep this signature parameterized
-    so it can be deferred ad-hoc with a custom lookback (e.g., for
-    backfill).
-    """
-    logger.info("sync_work_orders task triggered", lookback_hours=lookback_hours)
-    return await sync_recent_work_orders(lookback_hours=lookback_hours)
+async def sync_work_orders() -> dict:
+    """Manual / on-demand sync trigger. Identical to the scheduled run."""
+    logger.info("sync_work_orders task triggered")
+    return await sync_all_work_orders()
 
 
 @procrastinate_app.periodic(cron="*/5 * * * *")
@@ -35,13 +27,10 @@ async def scheduled_sync_work_orders(timestamp: int) -> dict:
     built-in scheduler.
 
     The `timestamp` arg is passed by Procrastinate (Unix epoch of the
-    scheduled tick) and is used here only for logging. Sync work delegates
-    to `sync_recent_work_orders` with the lookback from settings.
+    scheduled tick) and is used here only for logging.
     """
     logger.info("scheduled sync tick", timestamp=timestamp)
-    return await sync_recent_work_orders(
-        lookback_hours=_settings.SC_SYNC_LOOKBACK_HOURS,
-    )
+    return await sync_all_work_orders()
 
 
 @procrastinate_app.task(name="sync_work_order_detail", queue="default")
