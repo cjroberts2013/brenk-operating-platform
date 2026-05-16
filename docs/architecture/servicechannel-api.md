@@ -37,8 +37,28 @@ Our implementation: `app/services/servicechannel/auth.py`
 ```
 GET /v3/workorders
 ```
-Returns a JSON array of work order objects. Pagination and filter parameter
-names still to be confirmed against Swagger.
+Returns a JSON array of work order objects.
+
+**Pagination** is page-based:
+- `page` — 1-indexed page number
+- `pageSize` — records per page. **Default and maximum is 50.** Passing a
+  larger value is silently clamped to 50.
+
+To paginate, increment `page` until SC returns fewer records than `pageSize`
+(or an empty array). The endpoint provides no total-count header.
+
+**Filterable fields** (all confirmed via Swagger):
+`locationId`, `storeId`, `otherLocationId[]`, `id[]`, `category[]`,
+`categoryId[]`, `status[]`, `extendedStatus[]`, `number[]` (starts-with),
+`serviceId[]` (starts-with), `priority[]`, `purchaseNumber[]` (starts-with),
+`trade[]` (starts-with), `tradeId[]`, `scheduledDate[]`, `expirationDate[]`,
+`callDate[]`, plus a `sort` string (syntax not documented in Swagger —
+needs experimentation to find direction tokens).
+
+**There is NO `updatedSince` / `updatedFrom` / `modifiedSince` parameter** on
+this endpoint. Incremental sync by update time has to happen client-side:
+either pull all pages and filter by `UpdatedDate`, or sort by update time
+descending and stop pagination once an old record appears.
 
 ### Get a single work order
 ```
@@ -91,7 +111,8 @@ TBD — likely under `/v3/providers` or similar. Need to confirm whether SC
 exposes Brenk's sub-vendors or only the Brenk → CubeSmart relationship.
 
 ### "Updated since" filter
-The single most useful filter for incremental sync. Parameter name TBD.
+**Confirmed unsupported on `/v3/workorders`** — the Swagger has no such
+parameter. Incremental sync filters by `UpdatedDate` client-side.
 
 ## Throttling Behavior
 
@@ -120,8 +141,9 @@ Our client respects `Retry-After` automatically.
 
 ## Open Questions
 
-- Exact pagination scheme for list endpoints
-- Filter parameter names: `updatedFrom`, `modifiedSince`, etc.
+- Exact syntax of the `sort` parameter on `/v3/workorders` (direction tokens
+  — likely one of `UpdatedDate desc`, `-UpdatedDate`, or `UpdatedDate&direction=desc`).
+  Required if we want to short-circuit pagination during incremental sync.
 - Where attachment files actually live (pre-signed URLs vs. file IDs)
 - How sub-vendors are represented (or whether they're not at all)
 - Webhooks: ServiceChannel offers them — could replace polling for some events

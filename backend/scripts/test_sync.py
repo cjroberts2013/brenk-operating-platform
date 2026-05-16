@@ -41,6 +41,7 @@ async def main() -> None:
     print("=" * 60)
     summary = await sync_recent_work_orders(lookback_hours=720)
     print(f"  fetched:  {summary['fetched']}")
+    print(f"  skipped:  {summary['skipped']}")
     print(f"  upserted: {summary['upserted']}")
     print(f"  errors:   {len(summary['errors'])}")
     for err in summary["errors"][:5]:

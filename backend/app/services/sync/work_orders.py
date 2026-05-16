@@ -2,6 +2,10 @@
 
 Glues the ServiceChannel client to the upserter. Each WO is committed in its
 own transaction so a single malformed payload doesn't poison the batch.
+
+Recency filtering happens client-side: SC's /v3/workorders endpoint has no
+"updated since" filter (confirmed via Swagger), so we paginate everything
+and skip records older than the cutoff before upserting.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -11,6 +15,7 @@ import structlog
 
 from app.db.session import AsyncSessionLocal
 from app.services.servicechannel.client import ServiceChannelClient
+from app.services.sync.transformers import parse_utc
 from app.services.sync.upserter import upsert_work_order
 
 logger = structlog.get_logger(__name__)
@@ -19,31 +24,45 @@ logger = structlog.get_logger(__name__)
 async def sync_recent_work_orders(
     lookback_hours: int = 1,
     sc_client: ServiceChannelClient | None = None,
+    max_pages: int = 200,
 ) -> dict[str, Any]:
-    """Fetch recently-updated work orders from SC and upsert them.
+    """Fetch work orders from SC, filter to recent ones, and upsert them.
 
     Args:
-        lookback_hours: How far back to fetch updated work orders.
-        sc_client: Optional injected client for testing. A fresh
-            ServiceChannelClient is constructed if not provided.
+        lookback_hours: Only upsert work orders whose `UpdatedDate` is within
+            this window. Records older than the cutoff are counted as
+            `skipped` but not upserted.
+        sc_client: Optional injected client for testing.
+        max_pages: Hard cap on pagination — passed through to the SC client.
 
     Returns:
-        A summary dict: {"fetched": int, "upserted": int, "errors": list}.
-        Errors are recorded per-WO; a failure on one does not abort the batch.
+        Summary: {"fetched", "skipped", "upserted", "errors"}. Errors are
+        recorded per-WO; one failure does not abort the batch.
     """
     client = sc_client or ServiceChannelClient()
-    since = (datetime.now(UTC) - timedelta(hours=lookback_hours)).isoformat()
+    cutoff = datetime.now(UTC) - timedelta(hours=lookback_hours)
 
-    logger.info("work order sync starting", lookback_hours=lookback_hours, since=since)
-    payloads = await client.list_work_orders(updated_since=since)
+    logger.info(
+        "work order sync starting",
+        lookback_hours=lookback_hours,
+        cutoff=cutoff.isoformat(),
+    )
 
     summary: dict[str, Any] = {
-        "fetched": len(payloads),
+        "fetched": 0,
+        "skipped": 0,
         "upserted": 0,
         "errors": [],
     }
 
-    for payload in payloads:
+    async for payload in client.iter_work_orders(max_pages=max_pages):
+        summary["fetched"] += 1
+
+        updated = parse_utc(payload.get("UpdatedDate"))
+        if updated is not None and updated < cutoff:
+            summary["skipped"] += 1
+            continue
+
         sc_id = payload.get("Id")
         try:
             async with AsyncSessionLocal() as session:
@@ -57,6 +76,7 @@ async def sync_recent_work_orders(
     logger.info(
         "work order sync complete",
         fetched=summary["fetched"],
+        skipped=summary["skipped"],
         upserted=summary["upserted"],
         errors=len(summary["errors"]),
     )

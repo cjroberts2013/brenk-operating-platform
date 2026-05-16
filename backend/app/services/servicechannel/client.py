@@ -10,6 +10,7 @@ Reference: https://developer.servicechannel.com/swagger/ui/index?version=3
 """
 
 import asyncio
+from collections.abc import AsyncIterator
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -54,36 +55,62 @@ class ServiceChannelClient:
     # Public methods
     # -------------------------------------------------------------------------
 
-    async def list_work_orders(
-        self,
-        updated_since: str | None = None,
-        status: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List work orders.
+    # SC's /v3/workorders endpoint caps pageSize at 50 regardless of what you ask for.
+    SC_MAX_PAGE_SIZE = 50
 
-        Note: The exact filter parameter names are TBD pending API exploration.
-        Update these once we confirm via Swagger.
+    async def list_work_orders_page(
+        self,
+        page: int = 1,
+        page_size: int = SC_MAX_PAGE_SIZE,
+        sort: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch one page of work orders.
+
+        SC has no "updated since" filter on this endpoint (confirmed via
+        Swagger). Caller is responsible for any recency filtering.
 
         Args:
-            updated_since: ISO 8601 timestamp to filter for WOs updated after this time.
-            status: Optional status filter.
-            limit: Number of records per request.
-            offset: Pagination offset.
+            page: 1-indexed page number.
+            page_size: Records per page. SC caps at 50; larger values are
+                silently clamped down.
+            sort: Optional SC sort expression. Syntax not yet documented;
+                pass through as-is.
 
         Returns:
-            A list of work order dicts as returned by the API.
+            The list of work order dicts for the requested page. Empty list
+            when past the last page.
         """
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-        if updated_since:
-            params["updatedFrom"] = updated_since  # TODO: confirm exact param name
-        if status:
-            params["status"] = status
+        page_size = min(page_size, self.SC_MAX_PAGE_SIZE)
+        params: dict[str, Any] = {"page": page, "pageSize": page_size}
+        if sort:
+            params["sort"] = sort
 
         response = await self._request("GET", "/v3/workorders", params=params)
-        # The list endpoint returns a JSON array directly (confirmed empirically).
         return response if isinstance(response, list) else response.get("data", [])
+
+    async def iter_work_orders(
+        self,
+        page_size: int = SC_MAX_PAGE_SIZE,
+        sort: str | None = None,
+        max_pages: int = 200,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield every work order across pages until exhaustion.
+
+        Stops when SC returns a partial or empty page. `max_pages` is a
+        safety cap so a misbehaving server can't drive an infinite loop —
+        defaults to 200 pages * 50 records = 10,000 WOs.
+        """
+        for page in range(1, max_pages + 1):
+            records = await self.list_work_orders_page(page=page, page_size=page_size, sort=sort)
+            for record in records:
+                yield record
+            if len(records) < page_size:
+                return
+        logger.warning(
+            "iter_work_orders hit max_pages safety cap; results may be truncated",
+            max_pages=max_pages,
+            page_size=page_size,
+        )
 
     async def get_work_order(self, work_order_id: int | str) -> dict[str, Any]:
         """Fetch a single work order by its SC ID."""
@@ -180,9 +207,7 @@ class ServiceChannelClient:
             raise httpx.NetworkError(f"Transient SC error: {response.status_code}")
 
         if response.status_code >= 400:
-            raise ServiceChannelError(
-                f"SC API error: {response.status_code} {response.text}"
-            )
+            raise ServiceChannelError(f"SC API error: {response.status_code} {response.text}")
 
         if not response.content:
             return None
