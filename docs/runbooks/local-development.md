@@ -67,8 +67,12 @@ If this fails, fix it before going further. Likely culprits:
 First, run Procrastinate's own schema setup (one time, creates the job queue tables):
 
 ```bash
-procrastinate --app=app.workers.app schema --apply
+procrastinate --app=app.workers.app.procrastinate_app schema --apply
 ```
+
+> The `--app` flag needs the **full dotted path including the variable name**
+> (`...procrastinate_app`), not just the module path. The Procrastinate CLI
+> uses `App.from_path()` which expects the variable to be addressable.
 
 Then apply our application migrations:
 
@@ -94,13 +98,25 @@ uvicorn app.main:app --reload --port 8000
 Open `http://localhost:8000/docs` for the auto-generated API docs.
 Open `http://localhost:8000/health` to confirm the service is up.
 
-## 7. Run the Worker (Optional in Week 1)
+## 7. Run the Worker
 
-Once we have real sync tasks (Week 2), open a second terminal:
+Open a second terminal:
 
 ```bash
 source .venv/bin/activate
-procrastinate --app=app.workers.app worker
+procrastinate --app=app.workers.app.procrastinate_app worker
+```
+
+The worker automatically picks up periodic tasks defined with
+`@procrastinate_app.periodic(cron=...)`. As of this writing,
+`scheduled_sync_work_orders` runs every 5 minutes — you should see
+"scheduled sync tick" log lines as it fires.
+
+To run a task ad-hoc (e.g., a backfill with a custom lookback):
+
+```bash
+procrastinate --app=app.workers.app.procrastinate_app defer \
+  sync_work_orders --lookback-hours 720
 ```
 
 ## Running Tests

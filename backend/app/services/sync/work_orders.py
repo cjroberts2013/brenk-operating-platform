@@ -6,6 +6,13 @@ own transaction so a single malformed payload doesn't poison the batch.
 Recency filtering happens client-side: SC's /v3/workorders endpoint has no
 "updated since" filter (confirmed via Swagger), so we paginate everything
 and skip records older than the cutoff before upserting.
+
+TODO(filter-semantics): The current "skip if UpdatedDate < cutoff" logic is
+fine for the recurring incremental sync, but it can theoretically miss
+long-lived in-progress WOs that haven't been touched recently. We probably
+want either (a) a separate "full sync" mode with no filter for initial
+backfill + periodic reconciliation, or (b) to never filter and just rely on
+upsert idempotency. Revisit before production.
 """
 
 from datetime import UTC, datetime, timedelta
