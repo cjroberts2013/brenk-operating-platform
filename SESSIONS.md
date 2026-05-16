@@ -8,6 +8,109 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 16, 2026 (afternoon, continued) — ~2.5 hours
+
+### Accomplishments
+
+**Pagination + filter-semantics fix in the SC client (commit `b457509`):**
+- Investigated SC's `/v3/workorders` Swagger and confirmed two things:
+  the endpoint paginates via `page`/`pageSize` (max 50, default 50), and
+  **there is no `updatedSince`/`updatedFrom` parameter**. Our previous
+  client was passing `updatedFrom=<timestamp>` which SC silently ignored
+  — so `sync_recent_work_orders(lookback_hours=N)` was effectively just
+  fetching the first 50 records regardless of `N`.
+- Replaced `list_work_orders(limit, offset, updated_since)` with
+  `list_work_orders_page(page, page_size, sort)` and an async iterator
+  `iter_work_orders()` that paginates until a partial/empty page,
+  capped at 200 pages (10K records) for safety.
+- `sync_recent_work_orders` now iterates all pages and filters
+  client-side by `UpdatedDate >= cutoff`. Summary gained a `skipped`
+  counter.
+- 4 respx-based unit tests for pagination, empty pages, the max-pages
+  safety cap, and pageSize clamping.
+- Updated `docs/architecture/servicechannel-api.md` with the corrected
+  pagination scheme + the lack of an `updatedSince` filter.
+- End-to-end verified: sandbox has **327 WOs**, not 50 — we'd been
+  silently truncating data. With the new pagination, the smoke test
+  fetched 327, skipped 160 (older than 30 days), upserted 167.
+  Idempotent on rerun.
+
+**Recurring schedule via Procrastinate periodic (commit `bec631e`):**
+- Applied Procrastinate's job-queue schema to Supabase (one-time setup).
+- Added `scheduled_sync_work_orders(timestamp)` decorated with
+  `@procrastinate_app.periodic(cron="*/5 * * * *")` — runs every 5
+  minutes, delegates to `sync_recent_work_orders` with the lookback
+  from settings. Kept the existing `sync_work_orders(lookback_hours)`
+  task for ad-hoc/manual invocations.
+- Discovered the Procrastinate CLI requires the **full dotted path to
+  the App variable** (`app.workers.app.procrastinate_app`), not just
+  the module path. Updated `docs/runbooks/local-development.md` with
+  the corrected invocation, a note about periodic schedule discovery,
+  and how to defer tasks ad-hoc.
+- Verified end-to-end: worker boots, registers the cron, fires the
+  first tick immediately (Procrastinate fires missed periodic ticks on
+  startup), paginates all 7 pages, returns a clean success result.
+
+**Note on the recency filter:** during the scheduled-sync verification,
+the very first run skipped all 327 records because the 24-hour default
+lookback excluded everything in the sandbox. Charles flagged the
+concern that in production, long-lived in-progress WOs might be
+filtered out if they haven't been touched recently. Added a TODO in
+`work_orders.py` to revisit before production — likely either a
+separate full-sync mode or dropping the filter entirely and relying on
+upsert idempotency.
+
+**REST endpoints for work orders (commit `d374dfb`):**
+- Added Pydantic response schemas in `app/schemas/work_order.py`:
+  `WorkOrderSummary` (list view), `WorkOrderDetail` (single view),
+  nested `ClientRef`/`LocationRef`/`TradeRef`/`VendorRef`, and a
+  paginated envelope.
+- Implemented `GET /api/v1/work-orders/` with filters (status,
+  client_id, trade_id, updated_since) and pagination (page, page_size
+  up to 200). Orders by `sc_updated_date desc` with deterministic
+  fallback on `id desc`. Eager-loads `client`/`location`/`trade`.
+- Implemented `GET /api/v1/work-orders/{id}` returning full detail
+  with all related refs eager-loaded. 404 on unknown id.
+- 7 integration tests using `httpx.AsyncClient` + `ASGITransport`
+  against the real dev DB. Total test count is now **26 passing**.
+- Manually smoke-tested with curl: list returns 167 WOs with embedded
+  refs, `status=COMPLETED` filter narrows to 54, detail returns full
+  payload, unknown id returns 404.
+
+### Decisions & Observations
+
+- **Test infrastructure: FastAPI's sync `TestClient` doesn't play well
+  with SQLAlchemy's async engine** — it spins up a new event loop per
+  request, but the async connection pool caches connections tied to
+  the first loop, so subsequent tests fail with "Event loop is closed."
+  The fix: use `httpx.AsyncClient` + `ASGITransport` and override
+  `get_async_db` with a `NullPool`-backed engine for tests. Documented
+  in the integration test module's docstring for future reference.
+- **No `updatedSince` on `/v3/workorders`.** Confirmed via Swagger.
+  All recency filtering happens client-side after pagination.
+- **Procrastinate fires missed periodic ticks on startup.** So
+  restarting the worker doesn't lose a tick. Convenient.
+- **API filters use internal database ids, not SC ids.** A consumer
+  filtering by `client_id=1` means "our internal Client.id = 1" not
+  "sc_subscriber_id". The Swagger docs make this clear via the
+  parameter descriptions.
+
+### Up Next
+
+1. **Reconsider the recency filter** before doing anything else
+   production-bound — Charles's concern is valid and the scheduled run
+   skipping all 327 sandbox records is direct evidence.
+2. Implement `sync_work_order_detail` for notes: call
+   `/v3/workorders/{id}/notes`, transform, upsert into `wo_notes`.
+   Decide trigger (every WO sync vs. only when notes_count changes).
+3. Wire up Supabase Auth + JWT verification on the FastAPI endpoints.
+4. Address the 10 pre-existing ruff errors (`config.py` uppercase
+   property names, `migrations/env.py` unused noqa, autogenerated
+   migration's old `typing.Sequence` import).
+5. Begin the Next.js dashboard scaffold (Week 4).
+
+---
+
 ## Session: May 16, 2026 (afternoon) — ~1.5 hours
 
 ### Accomplishments
