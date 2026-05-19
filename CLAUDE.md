@@ -32,6 +32,20 @@ sellable.
 | 4 | Intelligence & Analytics | Not started |
 | 5 | Public-Facing Business Website (CMS-driven) | Not started |
 
+### Possible phase reorder (open decision, 2026-05-19)
+
+Charles is considering promoting the storefront from Phase 5 to
+**Phase 2**, ahead of QuickBooks integration. Rationale: storefront
+is low complexity, ships quickly, gives Brenk an external face Daryl
+can actually point clients at. Decide before starting Phase 2 work.
+
+Tradeoff to weigh: QuickBooks/invoice automation is what directly
+addresses Sue's clipboard + Daryl's markup-board burden, which is
+the current operational pain point. Storefront is mostly marketing
+value, less daily-grind relief. If Daryl needs the invoice workload
+unloaded urgently, keep QuickBooks at Phase 2; if external presence
+is the bigger near-term win, swap them.
+
 ### Phase 5 — Public-Facing Storefront (captured 2026-05-19)
 
 The internal dashboard we're building lives at
