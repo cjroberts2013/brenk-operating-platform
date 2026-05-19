@@ -30,7 +30,36 @@ sellable.
 | 2 | QuickBooks Integration & Invoice Automation | Not started |
 | 3 | Vendor Communication Automation | Not started |
 | 4 | Intelligence & Analytics | Not started |
-| 5 | Public-Facing Business Website | Not started |
+| 5 | Public-Facing Business Website (CMS-driven) | Not started |
+
+### Phase 5 — Public-Facing Storefront (captured 2026-05-19)
+
+The internal dashboard we're building lives at
+`app.brenkfacilityservices.com` (or whatever domain Brenk eventually
+uses), authenticated behind Supabase Auth. The base domain
+(`brenkfacilityservices.com`) hosts a public marketing storefront —
+contact info, services offered, project gallery, etc.
+
+Key constraint: the storefront content must be editable from the
+authenticated dashboard. Daryl (and Charles) update marketing copy
+without touching code. Implementation will probably be:
+
+- A new `storefront` table or set of tables in the Brenk DB (sections,
+  blocks, images — whatever the content model needs)
+- A "Storefront" tab in the dashboard sidebar for editing
+- The public site fetches content from the same FastAPI backend (read-
+  only, no auth required for the public endpoints) and renders it via
+  Next.js static-site-generation or server-side rendering, rebuilt on
+  content change
+
+Open architectural decision (defer to Phase 5):
+- Same Next.js project with hostname-based routing, OR two separate
+  Next.js projects sharing the API. Probably the latter — cleaner
+  deployment boundaries, simpler caching strategy for the public site.
+
+Auth scoping works correctly out of the box: cookies set by
+`app.<domain>` are not shared with the base domain, so the storefront
+stays public and the dashboard stays locked.
 
 ## Current State (Phase 1)
 
