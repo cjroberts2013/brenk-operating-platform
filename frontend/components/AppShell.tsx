@@ -6,9 +6,10 @@
  * Adapted from the Tailwind UI "Dark sidebar with header" reference
  * (see docs/design/dashboard-shell.tsx for the original).
  *
- * Auth is not wired yet (Phase 1, Step 3). The user menu shows a "Not
- * signed in" placeholder; Sign in points at /login which doesn't exist
- * yet — that's intentional and gets fixed when Supabase Auth lands.
+ * The shell itself is a Client Component (uses state + Headless UI
+ * interactivity). The signed-in user is fetched server-side in
+ * app/layout.tsx and passed in as a prop, so the shell stays purely
+ * presentational re: auth.
  */
 
 import { useState } from 'react'
@@ -52,13 +53,16 @@ const navigation: NavItem[] = [
   { name: 'Reports', href: '/reports', icon: ChartPieIcon },
 ]
 
-const userNavigation = [
-  // TODO(auth): wire to Supabase Auth signIn / signOut in Phase 1 Step 3
-  { name: 'Sign in', href: '/login' },
-]
+export type ShellUser = {
+  email: string
+}
 
 function classNames(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(' ')
+}
+
+function avatarInitial(email: string): string {
+  return email.charAt(0).toUpperCase() || '?'
 }
 
 function isActive(pathname: string, href: string): boolean {
@@ -126,7 +130,13 @@ function LogoMark() {
   )
 }
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({
+  children,
+  user,
+}: {
+  children: React.ReactNode
+  user: ShellUser | null
+}) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
 
@@ -228,20 +238,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-900/10 dark:lg:bg-gray-100/10"
               />
 
-              {/* User menu — placeholder until Supabase Auth lands */}
+              {/* User menu */}
               <Menu as="div" className="relative">
                 <MenuButton className="relative flex items-center">
                   <span className="absolute -inset-1.5" />
                   <span className="sr-only">Open user menu</span>
-                  <div className="flex size-8 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
-                    ?
+                  <div className="flex size-8 items-center justify-center rounded-full bg-indigo-500 text-xs font-semibold text-white">
+                    {user ? avatarInitial(user.email) : '?'}
                   </div>
                   <span className="hidden lg:flex lg:items-center">
                     <span
                       aria-hidden="true"
                       className="ml-4 text-sm/6 font-semibold text-gray-900 dark:text-white"
                     >
-                      Not signed in
+                      {user?.email ?? 'Not signed in'}
                     </span>
                     <ChevronDownIcon
                       aria-hidden="true"
@@ -251,18 +261,42 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </MenuButton>
                 <MenuItems
                   transition
-                  className="absolute right-0 z-10 mt-2.5 w-32 origin-top-right rounded-md bg-white py-2 shadow-lg outline outline-gray-900/5 transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in dark:bg-gray-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10"
+                  className="absolute right-0 z-10 mt-2.5 w-40 origin-top-right rounded-md bg-white py-2 shadow-lg outline outline-gray-900/5 transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in dark:bg-gray-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10"
                 >
-                  {userNavigation.map((item) => (
-                    <MenuItem key={item.name}>
+                  {user ? (
+                    <>
+                      <MenuItem>
+                        <Link
+                          href="/settings"
+                          className="block px-3 py-1 text-sm/6 text-gray-900 data-focus:bg-gray-50 data-focus:outline-hidden dark:text-white dark:data-focus:bg-white/5"
+                        >
+                          Settings
+                        </Link>
+                      </MenuItem>
+                      <MenuItem>
+                        {/* Plain form posts to a Route Handler. Avoids
+                            needing a separate client-side click handler
+                            for sign-out. */}
+                        <form action="/auth/sign-out" method="POST">
+                          <button
+                            type="submit"
+                            className="block w-full px-3 py-1 text-left text-sm/6 text-gray-900 data-focus:bg-gray-50 data-focus:outline-hidden dark:text-white dark:data-focus:bg-white/5"
+                          >
+                            Sign out
+                          </button>
+                        </form>
+                      </MenuItem>
+                    </>
+                  ) : (
+                    <MenuItem>
                       <Link
-                        href={item.href}
+                        href="/login"
                         className="block px-3 py-1 text-sm/6 text-gray-900 data-focus:bg-gray-50 data-focus:outline-hidden dark:text-white dark:data-focus:bg-white/5"
                       >
-                        {item.name}
+                        Sign in
                       </Link>
                     </MenuItem>
-                  ))}
+                  )}
                 </MenuItems>
               </Menu>
             </div>
