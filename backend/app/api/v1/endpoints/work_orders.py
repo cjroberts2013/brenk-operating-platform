@@ -10,18 +10,28 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_async_db
-from app.models.work_order import WorkOrder, WorkOrderNote
+from app.models.work_order import Vendor, WorkOrder, WorkOrderNote
 from app.schemas.work_order import (
     WorkOrderDetail,
     WorkOrderListResponse,
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
+
+
+class WorkOrderUpdate(BaseModel):
+    """PATCH body for a work order. Only Brenk-internal fields are
+    writable in Phase 1 — SC-owned fields (status, dates, etc.) are
+    not exposed here. Set `assigned_vendor_id` to `null` to unassign.
+    """
+
+    assigned_vendor_id: int | None = None
 
 router = APIRouter()
 
@@ -93,14 +103,21 @@ async def list_work_orders(
     )
 
 
-@router.get("/{work_order_id}", response_model=WorkOrderDetail)
-async def get_work_order(
+async def _fetch_work_order(
+    db: AsyncSession,
     work_order_id: int,
-    db: Annotated[AsyncSession, Depends(get_async_db)],
-) -> WorkOrderDetail:
-    """Get a single work order by its internal database id.
+    *,
+    populate_existing: bool = False,
+) -> WorkOrder:
+    """Load a WO with all relationships eager-loaded, or raise 404.
 
-    Returns 404 if no such work order exists.
+    Centralized so the GET and PATCH endpoints can't drift apart on which
+    relationships they eager-load — both call this helper.
+
+    `populate_existing=True` bypasses the session's identity-map cache —
+    use it after a PATCH so the response reflects the freshly-updated
+    relationships (otherwise SQLAlchemy returns the in-memory copy that
+    still has the pre-update relationship snapshot).
     """
     stmt = (
         select(WorkOrder)
@@ -112,13 +129,71 @@ async def get_work_order(
         )
         .where(WorkOrder.id == work_order_id)
     )
+    if populate_existing:
+        stmt = stmt.execution_options(populate_existing=True)
     wo = (await db.execute(stmt)).scalar_one_or_none()
     if wo is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"work order {work_order_id} not found",
         )
+    return wo
+
+
+@router.get("/{work_order_id}", response_model=WorkOrderDetail)
+async def get_work_order(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderDetail:
+    """Get a single work order by its internal database id.
+
+    Returns 404 if no such work order exists.
+    """
+    wo = await _fetch_work_order(db, work_order_id)
     return WorkOrderDetail.model_validate(wo)
+
+
+@router.patch("/{work_order_id}", response_model=WorkOrderDetail)
+async def update_work_order(
+    work_order_id: int,
+    payload: WorkOrderUpdate,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderDetail:
+    """Update Brenk-internal fields on a work order.
+
+    Phase 1: only `assigned_vendor_id` is writable. Pass `null` to
+    unassign. Anything SC owns (status, dates, notes_count, etc.) is
+    not touched — those flow in via the sync worker.
+    """
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        # No-op PATCH: surface the current state, don't error.
+        return await get_work_order(work_order_id, db)
+
+    wo = await _fetch_work_order(db, work_order_id)
+
+    if "assigned_vendor_id" in update_data:
+        new_vendor_id = update_data["assigned_vendor_id"]
+        if new_vendor_id is not None:
+            exists = (
+                await db.execute(
+                    select(Vendor.id).where(Vendor.id == new_vendor_id)
+                )
+            ).scalar_one_or_none()
+            if exists is None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail=f"vendor {new_vendor_id} not found",
+                )
+        wo.assigned_vendor_id = new_vendor_id
+
+    await db.commit()
+    # populate_existing rebuilds the in-memory WO from the new SELECT
+    # results — picks up the server-side onupdate (`updated_at`) plus
+    # any relationship that changed. Without it, the session's identity
+    # map returns the pre-PATCH copy of the WO.
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    return WorkOrderDetail.model_validate(fresh)
 
 
 @router.get("/{work_order_id}/notes", response_model=list[WorkOrderNoteRef])

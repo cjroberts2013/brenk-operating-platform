@@ -14,7 +14,6 @@ from app.db.base import Base
 
 # Import all models so they're registered on Base.metadata before autogenerate runs.
 # Add new model modules here as they're created.
-# noqa: F401 imports are intentional — they register tables on Base.metadata
 from app.models import (  # noqa: F401
     work_order,
 )
@@ -31,6 +30,18 @@ config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 target_metadata = Base.metadata
 
 
+def _include_object(object_, name, type_, reflected, compare_to):
+    """Tell autogenerate to ignore tables Alembic doesn't own.
+
+    Procrastinate manages its own schema via `procrastinate schema
+    --apply`; if we don't filter them out, autogenerate sees them as
+    "extra" tables in the DB and proposes dropping them on the next
+    migration. Same will apply to any other tool that creates its own
+    tables in our database in the future.
+    """
+    return not (type_ == "table" and name and name.startswith("procrastinate_"))
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode — emits SQL without a live DB connection."""
     url = config.get_main_option("sqlalchemy.url")
@@ -40,6 +51,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=_include_object,
     )
 
     with context.begin_transaction():
@@ -59,6 +71,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=_include_object,
         )
 
         with context.begin_transaction():

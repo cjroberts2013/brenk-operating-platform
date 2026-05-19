@@ -94,6 +94,24 @@ class Location(Base, TimestampMixin):
         return f"<Location {self.store_id} {self.name}>"
 
 
+class VendorTrade(Base):
+    """Many-to-many junction between vendors and trades they specialize in.
+
+    Composite primary key — each (vendor, trade) pair appears at most
+    once. No surrogate id since rows here are intrinsically identified
+    by the pair.
+    """
+
+    __tablename__ = "vendor_trades"
+
+    vendor_id: Mapped[int] = mapped_column(
+        ForeignKey("vendors.id", ondelete="CASCADE"), primary_key=True
+    )
+    trade_id: Mapped[int] = mapped_column(
+        ForeignKey("trades.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
 class Vendor(Base, TimestampMixin):
     """A sub-vendor that Brenk dispatches work to.
 
@@ -112,7 +130,29 @@ class Vendor(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     raw_data: Mapped[dict | None] = mapped_column(JSONB)
 
+    # Brenk-internal operational fields (added 2026-05-19; not present in SC).
+    contact_preference: Mapped[str | None] = mapped_column(String(20))
+    """e.g. 'sms', 'call', 'email', 'other' — drives notification UX."""
+
+    payment_terms: Mapped[str | None] = mapped_column(String(100))
+    """Free text — 'invoices weekly', 'hourly', 'flat per job', etc."""
+
+    mobile_app_capable: Mapped[bool | None] = mapped_column(Boolean)
+    """Whether the vendor uses CubeSmart's mobile app for check-in /
+    GPS tracking. None = unknown."""
+
+    markup_notes: Mapped[str | None] = mapped_column(Text)
+    """e.g. 'premium work, run higher markup'."""
+
+    communication_notes: Mapped[str | None] = mapped_column(Text)
+    """e.g. 'don't text after 6pm', 'responds slowly'."""
+
     work_orders: Mapped[list["WorkOrder"]] = relationship(back_populates="assigned_vendor")
+    trade_specializations: Mapped[list["Trade"]] = relationship(
+        secondary="vendor_trades",
+        # Order alphabetically for stable response shapes.
+        order_by="Trade.name",
+    )
 
     def __repr__(self) -> str:
         return f"<Vendor {self.name}>"
