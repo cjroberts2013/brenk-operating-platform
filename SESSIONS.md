@@ -8,6 +8,166 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 18, 2026 — ~4.5 hours
+
+First real day on the dashboard. By the end of the session a signed-in
+user can see all 341 of Brenk's work orders, color-coded by status,
+click into the full detail page (with notes timeline + workflow
+pipeline view), and the SC deep-links land on the correct sandbox URL.
+
+### Accomplishments
+
+**Dashboard plan refinement (commit `8172098`):**
+- Captured Daryl's full email-to-invoice workflow as the canonical
+  reference: pink email request → yellow dispatch confirmed → Brenk
+  texts sub-vendor → vendor on-site via CubeSmart app → orange
+  complete → green store-confirmed → Sue's clipboard → Daryl markup →
+  invoice in SC.
+- Distilled the failure modes (vendor never actually texted, Sue's
+  clipboard pile, Daryl forgets to invoice after paying vendor on his
+  phone) into the lifecycle stages table in CLAUDE.md.
+- Confirmed the Phase 1 read-from-SC / write-to-Brenk-only scope and
+  added the Invoice Queue page to the build order.
+
+**Next.js dashboard scaffold (commit `c99495a`):**
+- Initialized `frontend/` with Next.js 16, React 19, Tailwind 4, App
+  Router, Turbopack. Required upgrading Node 18 → 22 via nvm.
+- Adapted the Tailwind UI "Dark sidebar with header" reference shell
+  into `components/AppShell.tsx`. Real nav (Dashboard / Work Orders /
+  Vendors / Reports / Settings), active-link highlighting via
+  `usePathname()`, placeholder user menu, mobile drawer.
+- Placeholder pages for each nav route.
+
+**Supabase Auth on the frontend (commit `150ded0`):**
+- `@supabase/ssr` cookie-aware factories for browser + server.
+- `proxy.ts` (Next 16's rename of `middleware.ts`) refreshes sessions
+  on every request and bounces unauthenticated traffic to /login,
+  preserving the originally requested path in `?next=`.
+- `/login` server-action sign-in form; `/auth/sign-out` route handler
+  cleared via plain `<form method="POST">` from the user menu.
+- Route group restructure: signed-in pages live under `(app)/` with
+  their own layout that wraps everything in the shell with a
+  server-fetched user. `/login` skips the shell.
+- AppShell now shows the real signed-in user's email in the top bar.
+
+**Backend JWT verification for ECC P-256 tokens (commit `8840a5f`):**
+- Charles's Supabase project had migrated to ECC P-256 signing keys
+  three days before this session, so every fresh access token from a
+  sign-in would have been rejected by the existing HS256-only backend.
+- Rewrote `app/core/auth.py` to dispatch on the token's `alg` header:
+  HS256 still uses `SUPABASE_JWT_SECRET` (keeps existing tests
+  working); ES256/RS256 verifies against the project's JWKS, fetched
+  once and cached for an hour with one cache-bust retry on `kid` miss.
+- `scripts/test_backend_auth.py` end-to-end check: signs in via
+  Supabase Auth REST, takes the returned ES256 token, calls our
+  backend. Verified locally: `status: 200, total: 327` against a
+  fresh sign-in.
+
+**Work Orders list (commit `816de9f`):**
+- `lib/api/server.ts` typed `apiFetch` helper. Reads the Supabase
+  access token from the cookie session, attaches `Authorization:
+  Bearer`, surfaces typed `ApiError` on non-2xx, uses `cache: 'no-store'`
+  so each render hits the API.
+- `lib/api/types.ts` mirrors the backend Pydantic schemas; TODO to
+  codegen from `/openapi.json` once the shapes settle.
+- `lib/api/work-orders.ts` exposes `listWorkOrders`,
+  `getWorkOrder`, `listWorkOrderNotes`.
+- `StatusBadge` component pins a consistent color mapping per
+  CLAUDE.md (yellow IN PROGRESS, green COMPLETED, pink OPEN/NEW,
+  gray CANCELLED, red EXPIRED) — Daryl learns it once.
+- `StatusFilter` (client component) updates `?status=` via
+  `router.push()` and resets `?page=`.
+- `Pagination` (server component) prev/next links built from current
+  search params.
+- The list page reads all of this together; renders an 8-column
+  table with status badge, WO#, location, trade, priority, NTE,
+  scheduled date, relative-time updated.
+
+**Work Order detail + sort change (commit `d88069a`):**
+- Backend list endpoint now orders by `sc_work_order_id DESC` —
+  matches how SC's own UI shows WOs (newest at the top), which is
+  what Daryl is already used to.
+- New `/work-orders/[id]` dynamic route with two-column layout. Left
+  column: details grid (trade, priority, dates, caller, etc.) +
+  description + notes timeline. Right rail: workflow checklist + SC
+  deep-link.
+- `WorkflowChecklist` derives stage state from WO data + (future)
+  Brenk-internal flags. SC-derived stages (Accepted, Dispatch
+  confirmed, Work complete, Closed by store, Invoiced) show real
+  status. Brenk-internal stages (Sub-vendor assigned, Vendor
+  notified, Vendor on-site, Ready to invoice, Markup decided) show
+  as "Not tracked yet" with notes pointing at when they ship.
+- `NotesTimeline` renders the notes feed chat-thread style: avatar
+  initials, author + company + relative time, "System" badge for
+  SystemNote entries, HTML-stripped body for safety.
+- 404 handling via Next's `notFound()` when the backend returns 404.
+- `NEXT_PUBLIC_SC_WEB_URL` env var so the "Open in ServiceChannel"
+  deep-link can be environment-aware. Sandbox default
+  `https://sb2.servicechannel.com`; the URL pattern is
+  `/sc/wo/Workorders/index?id=<sc_id>` (provided by Charles).
+
+**Bonus: refreshed the sandbox data mid-session.** Charles flagged
+that the dashboard was missing WOs from May 11+. Cause was the
+Procrastinate worker wasn't running (the periodic sync needs a
+worker process alive). Ran `scripts/test_sync.py` manually; pulled
+in 6 new WOs (327 → 333 → 341 by end) and re-fetched ~2,000 notes
+for WOs whose count had grown.
+
+### Decisions & Observations
+
+- **Use SC's color language directly** for status badges. Daryl's
+  already fluent in pink/yellow/orange/green; teaching him a
+  different palette would just be friction.
+- **`@supabase/ssr` over deprecated `auth-helpers-nextjs`.** Cookie-
+  based session handling is the modern Supabase pattern for SSR.
+  Worth flagging if you read old tutorials — they'll point at the
+  wrong package.
+- **Next.js 16 renamed `middleware.ts` → `proxy.ts`.** Same shape,
+  same runtime, new name. `AGENTS.md` (autogenerated by
+  create-next-app) explicitly warns to heed Next 16 deprecation
+  notices — that paid off here.
+- **Next 16 made `params` and `searchParams` into Promises.** Every
+  page that reads them needs `await`. Several training-data examples
+  online still show them as plain objects.
+- **Charles's Supabase project rotated JWT signing keys 3 days
+  before we got to auth.** Caught at smoke-test time, not in code.
+  Worth a note: if you ever add a new server that verifies Supabase
+  tokens, default to JWKS-based verification, not the legacy HS256
+  shared secret.
+- **Server components can't have event handlers.** The status filter
+  needed extracting to a Client Component to use the `onChange`
+  pattern. Pages stay server, interactivity gets its own file.
+- **Worker process must be running** for the every-5-min sync to
+  actually run. Currently lives in a separate terminal locally;
+  Fly.io's `fly.worker.toml` will keep it alive in production.
+  Documented in the local-development runbook.
+- **SC sandbox throttling is real and our retry path handles it.**
+  Today's notes resync hit the 40 req/min cap several times; the
+  `Retry-After` wait-and-retry path soaked the slowdowns cleanly,
+  no errors.
+
+### Up Next
+
+1. **Vendors backend.** Schema migration to expand the existing
+   `vendors` table with contact preferences, payment terms, mobile-
+   app capability, etc. New CRUD endpoints
+   `GET/POST/PATCH/DELETE /api/v1/vendors`.
+2. **Vendors page.** List + per-vendor detail + add/edit modal +
+   workload view + Tailwind UI calendar of scheduled WOs.
+3. **Wire the Sub-vendor assigned stage into WO detail** once the
+   Vendors API exists — moves the checklist from "Not tracked yet"
+   to interactive.
+4. **Dashboard pipeline funnel** (replace the placeholder home page).
+5. **Invoice queue** (replaces Sue's clipboard).
+
+### Open question carried into the next session
+
+- Does Charles have an existing vendor list (spreadsheet, contacts)
+  to import? Still open from previous sessions — would inform whether
+  the Vendors page launches empty or pre-populated.
+
+---
+
 ## Session: May 16, 2026 (evening) — ~2.5 hours
 
 This session closed out the Phase 1 backend. With the work below committed,

@@ -34,38 +34,45 @@ sellable.
 
 ## Current State (Phase 1)
 
-**Completed:**
+**Completed (backend):**
 - Project structure scaffolded (FastAPI + SQLAlchemy + Alembic + Procrastinate)
 - ServiceChannel app registered in Sandbox2
 - OAuth client built with token caching, refresh, retry, and rate-limit handling
-- End-to-end auth verified via `scripts/test_sc_auth.py` — pulls live WOs successfully
 - Database schema designed and committed as SQLAlchemy models
-- Architecture and API docs in `docs/`
 - Supabase project provisioned, `.env` configured with sync + async driver URLs
 - Initial Alembic migration generated and applied — all 7 tables live in Supabase
-- Work-order sync service implemented (`app/services/sync/`): transformers,
-  upserter (with auto status-history), and orchestrator
-- **SC client pagination** via `page`/`pageSize` with `iter_work_orders`
-  async iterator and a 10K-record safety cap
-- **Recurring schedule:** `scheduled_sync_work_orders` runs every 5 minutes
-  via Procrastinate's `@periodic(cron=...)` decorator
-- **REST API endpoints** for work orders: paginated list with filters,
-  single-WO detail, and per-WO notes — all with eager-loaded
-  Client/Location/Trade refs
-- **Notes sync** with smart count-delta trigger (only fetches when SC
-  reports more notes than we have stored); 2,930 notes successfully
-  backfilled in sandbox
-- **Supabase JWT auth** on all v1 endpoints via `HTTPBearer` security
-  scheme — Swagger UI gets an "Authorize" button; `/health` remains open
-- End-to-end verified: 327 work orders + 2,930 notes in Supabase,
-  queryable via the authenticated API
-- 34 tests passing (transformers, SC client, SC auth, API endpoints,
-  JWT auth)
+- Work-order sync service: transformers, upserter (with auto status-history),
+  orchestrator. SC client pagination + 10K-record safety cap.
+- Recurring schedule: `scheduled_sync_work_orders` runs every 5 minutes via
+  Procrastinate's `@periodic(cron=...)` (worker must be running)
+- REST API endpoints: paginated list (sorted by `sc_work_order_id` desc) with
+  filters, single-WO detail, and per-WO notes, all with eager-loaded refs
+- Notes sync with smart count-delta trigger
+- **Supabase JWT auth supports both HS256 (tests + legacy) and ES256/RS256
+  via JWKS** — handles Supabase's modern asymmetric signing keys
+- 34 backend tests passing
+- Live data: ~341 work orders, ~2,000 notes in Supabase
+
+**Completed (frontend):**
+- Next.js 16 + React 19 + Tailwind 4 + App Router scaffolded under `frontend/`
+- Tailwind UI "Dark sidebar with header" shell adapted into
+  `components/AppShell.tsx` with real nav and Next 16's `proxy.ts` for
+  session-refresh + auth-redirect
+- Supabase Auth sign-in / sign-out flow — server-side session handling
+  via `@supabase/ssr` cookie helpers
+- Typed API client (`lib/api/`) — auto-attaches the access token, surfaces
+  typed `ApiError` on non-2xx
+- Work Orders list page (`/work-orders`) — filterable, paginated, color-coded
+- Work Order detail page (`/work-orders/[id]`) — two-column layout with
+  Details + Notes timeline + Workflow checklist + SC deep-link
 
 **Not yet done:**
-- Next.js dashboard frontend (only remaining Phase 1 deliverable)
+- Vendors backend (schema migration + CRUD endpoints) and frontend page
+- Dashboard pipeline-funnel home page (currently placeholder)
+- Invoice queue page (replaces Sue's clipboard)
+- Per-vendor calendar view
 - Deployment to Fly.io / Vercel
-- 10 pre-existing ruff errors in legacy files
+- 10 pre-existing ruff errors in legacy backend files
 
 ## Tech Stack
 
@@ -171,21 +178,37 @@ python scripts/test_sc_auth.py
 
 ## What To Work On Next
 
-Read `docs/architecture/overview.md`, the **Dashboard Plan** section
-above, and the reference shell at `docs/design/dashboard-shell.tsx`.
-Follow the build order in the Dashboard Plan section. The next concrete
-task is **Supabase Auth login flow** — sign-in page, session handling,
-sign-out, user's email in the top bar.
+Auth + Work Orders list + Work Order detail are done. The next chunk
+is **Vendors** — needed before the Sub-vendor-assigned stage on the WO
+detail page can move from "Not tracked yet" to interactive. Steps in
+order:
 
-After that, the API client wrapper, then the Work Orders list as the
-first real data page.
+1. **Vendors backend.** Expand the `vendors` table with the fields
+   captured in the Dashboard Plan (contact preference, payment terms,
+   mobile-app capability, markup notes, communication notes, trade
+   specializations). Alembic migration + new
+   `GET/POST/PATCH/DELETE /api/v1/vendors` endpoints. Plus a
+   `vendor_id` write endpoint on work orders (or `PATCH /work-orders/{id}`
+   with a `assigned_vendor_id` field) so the WO detail page can
+   actually assign.
+2. **Vendors page.** List view (name, phone, # active WOs, last
+   assigned), per-vendor detail with their open WOs + a Tailwind UI
+   calendar view of scheduled WOs, add/edit modal.
+3. **Wire vendor assignment into the WO detail workflow checklist.**
+4. **Dashboard pipeline funnel.** Replaces the placeholder home page.
+5. **Invoice queue.** Tabbed list (Ready to mark up / Marked up /
+   Sent / Paid) with a Tailwind UI invoice-detail layout per WO. This
+   is the "Sue's clipboard" replacement.
 
-**Other backend cleanup deferred for now:**
+**Open question for the next session:** does Charles have an existing
+vendor list to import, or do we start with an empty Vendors table?
+
+**Other items still deferred:**
 - ~10 pre-existing ruff errors in `config.py`, `migrations/env.py`,
   and the autogenerated initial migration.
 - Fly.io deployment exercise (configs already exist).
 - `LICENSE` leftover merge-conflict markers in the working tree.
-- Local `main` is several commits ahead of `origin/main` — push when
+- Local `main` is ~16 commits ahead of `origin/main` — push when
   you're ready (won't push without an explicit ask).
 
 ## Dashboard Plan (Phase 1 frontend)
