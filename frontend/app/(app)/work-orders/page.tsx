@@ -51,7 +51,7 @@ export default async function WorkOrdersPage({
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {data.total.toLocaleString()} total
             {status ? <> · filtered to <strong>{status}</strong></> : null} ·
-            sorted by most recently updated
+            newest first
           </p>
         </div>
         <StatusFilter current={status} />

@@ -51,9 +51,9 @@ async def list_work_orders(
 ) -> WorkOrderListResponse:
     """List work orders, filtered and paginated.
 
-    Ordering: most recently updated first (`sc_updated_date DESC`), with
-    nulls last and a stable secondary sort on `id` for deterministic
-    pagination.
+    Ordering: highest ServiceChannel work order id first. SC issues ids
+    monotonically over time, so this puts the newest WOs at the top —
+    matches how SC's own UI orders them, which is what Daryl is used to.
     """
     filters = []
     if status is not None:
@@ -77,7 +77,7 @@ async def list_work_orders(
             selectinload(WorkOrder.location),
             selectinload(WorkOrder.trade),
         )
-        .order_by(WorkOrder.sc_updated_date.desc().nullslast(), WorkOrder.id.desc())
+        .order_by(WorkOrder.sc_work_order_id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
