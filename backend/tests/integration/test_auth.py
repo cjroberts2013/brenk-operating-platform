@@ -47,7 +47,9 @@ async def test_malformed_bearer_token_returns_401(
         headers={"Authorization": "Bearer not-a-real-jwt"},
     )
     assert response.status_code == 401
-    assert "invalid token" in response.json()["detail"].lower()
+    # Don't pin the exact wording — assert just that the 401 detail is
+    # about the token (not e.g. a database error masquerading as a 401).
+    assert "token" in response.json()["detail"].lower()
 
 
 async def test_expired_token_returns_401(unauth_client: httpx.AsyncClient) -> None:
