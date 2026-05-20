@@ -253,15 +253,26 @@ export function VendorFormModal({
               </Field>
             </Row>
 
-            <Field label="Payment terms">
-              <input
-                type="text"
-                name="payment_terms"
-                placeholder="e.g. Invoices weekly · Hourly · Flat per job"
-                defaultValue={vendor?.payment_terms ?? ''}
-                className={inputClass}
-              />
-            </Field>
+            <Row>
+              <Field label="Payment terms">
+                <input
+                  type="text"
+                  name="payment_terms"
+                  placeholder="e.g. Contract · Hourly · Flat per job"
+                  defaultValue={vendor?.payment_terms ?? ''}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Service area">
+                <input
+                  type="text"
+                  name="service_area"
+                  placeholder="e.g. Austin & San Antonio · Anywhere · Longview only"
+                  defaultValue={vendor?.service_area ?? ''}
+                  className={inputClass}
+                />
+              </Field>
+            </Row>
 
             <Field label="Trade specializations">
               {tradesList.length === 0 && !tradeQuery ? (

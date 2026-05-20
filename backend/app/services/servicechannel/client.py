@@ -112,6 +112,25 @@ class ServiceChannelClient:
             page_size=page_size,
         )
 
+    async def list_users(self) -> list[dict[str, Any]]:
+        """Return every user at the authenticated provider account.
+
+        Uses SC's OData users endpoint. The traditional `/v3/users`
+        endpoint is gated by a permission our app doesn't currently
+        have ("API call rejected by security permissions" / error 504),
+        but the OData variant is reachable and returns the same data.
+
+        Brenk's account has ~30 users so a single request suffices —
+        no pagination loop needed today. If the population grows we
+        can switch to `?$top=N&$skip=K` paging here.
+        """
+        response = await self._request(
+            "GET",
+            "/v3/odata/users",
+            params={"$select": "Id,FullName,Email,UserName,UserType,Disabled"},
+        )
+        return list(response.get("value", []))
+
     async def get_work_order(self, work_order_id: int | str) -> dict[str, Any]:
         """Fetch a single work order by its SC ID."""
         return await self._request("GET", f"/v3/workorders/{work_order_id}")

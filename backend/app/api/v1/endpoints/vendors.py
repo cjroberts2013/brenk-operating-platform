@@ -13,6 +13,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from pydantic import BaseModel
+
 from app.db.session import get_async_db
 from app.models.work_order import Trade, Vendor, WorkOrder
 from app.schemas.vendor import (
@@ -22,6 +24,16 @@ from app.schemas.vendor import (
     VendorSummary,
     VendorUpdate,
 )
+from app.services.sync.vendors import sync_vendors_from_sc
+
+
+class VendorSyncSummary(BaseModel):
+    """Result of POST /api/v1/vendors/sync."""
+
+    fetched: int
+    created: int
+    updated: int
+    errors: int
 
 router = APIRouter()
 
@@ -129,6 +141,20 @@ def _to_summary(vendor: Vendor, active_count: int) -> VendorSummary:
 # -----------------------------------------------------------------------------
 # Endpoints
 # -----------------------------------------------------------------------------
+
+
+@router.post("/sync", response_model=VendorSyncSummary)
+async def sync_vendors_endpoint() -> VendorSyncSummary:
+    """Trigger a one-way sync from SC's user catalog into our vendors
+    table. Brenk-internal fields are preserved. Safe to call repeatedly.
+    """
+    summary = await sync_vendors_from_sc()
+    return VendorSyncSummary(
+        fetched=summary["fetched"],
+        created=summary["created"],
+        updated=summary["updated"],
+        errors=len(summary["errors"]),
+    )
 
 
 @router.get("/", response_model=VendorListResponse)

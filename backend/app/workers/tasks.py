@@ -10,6 +10,7 @@ import structlog
 from app.db.session import AsyncSessionLocal
 from app.services.servicechannel.client import ServiceChannelClient
 from app.services.sync.notes import sync_notes_for_sc_work_order_id
+from app.services.sync.vendors import sync_vendors_from_sc
 from app.services.sync.work_orders import sync_all_work_orders
 from app.workers.app import procrastinate_app
 
@@ -56,9 +57,12 @@ async def sync_work_order_detail(sc_work_order_id: int) -> dict:
 
 @procrastinate_app.task(name="sync_vendors", queue="default")
 async def sync_vendors() -> dict:
-    """Sync vendor / provider data from ServiceChannel.
+    """Sync the vendor list from ServiceChannel's user catalog.
 
-    TODO: implement once Brenk's sub-vendor model is finalized.
+    SC users are the canonical identity for Brenk's sub-vendors (each
+    is added to SC under an `admin+N@brenkfacilityservices.com` email).
+    This task imports them all and the operator curates the rest in
+    the dashboard. Brenk-internal fields are never overwritten.
     """
     logger.info("sync_vendors task triggered")
-    return {"status": "not_implemented"}
+    return await sync_vendors_from_sc()

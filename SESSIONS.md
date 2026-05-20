@@ -8,6 +8,170 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 19, 2026 — ~5 hours
+
+Closed the loop between SC's user list and Brenk's vendor records,
+captured Daryl's real vendor contact data into dev with his preferred
+labels, and added a service-area dimension so we can route work by
+geography.
+
+### Accomplishments
+
+**Vendor sync from SC (commits coming in this session):**
+- Investigated where SC stores the "assigned tech / vendor" idea.
+  Probed `/v3/odata/employees`, `/v3/odata/users`, `/v3/workorders/{id}`
+  Assignee field, and `/v3/workorders/{id}/workactivities`. Conclusion:
+  SC's sandbox doesn't expose a usable per-WO vendor identity through
+  v3 — the Assignee field is empty across our 341 WOs and the only
+  user-level data we can pull is the OData users endpoint. Decision:
+  **stay with the Brenk-native assignment model** (already shipped on
+  WO detail) and use SC's `users` list purely as a seed for vendor
+  identities.
+- New SC client method `list_users()` hitting
+  `/v3/odata/users?$select=Id,FullName,Email,UserName,UserType,Disabled`.
+  (Plain `/v3/users` returns 401 — OData is the only path.)
+- New `app/services/sync/vendors.py` with `sync_vendors_from_sc`:
+  - **Match strategy 1:** existing row by `sc_user_id`
+  - **Match strategy 2:** existing row by lower(email) — covers the
+    sandbox → production cutover where the same human gets a different
+    SC user id but keeps their email. Critical so Daryl's curated
+    notes survive the environment swap.
+  - Otherwise insert a new row.
+  - Brenk-internal fields (markup_notes, payment_terms,
+    contact_preference, communication_notes, mobile_app_capable,
+    trade_specializations, notes, is_active) are **never overwritten**
+    by sync. Daryl owns those columns.
+- New `vendors.sc_user_id` column (nullable, unique, indexed). NULL =
+  Brenk-only vendor that never came from SC.
+- `POST /api/v1/vendors/sync` endpoint + Procrastinate `sync_vendors`
+  task body (was a stub).
+- Frontend: new `SyncFromScButton` client component with
+  `useTransition`, server action `syncVendorsAction`, wired into the
+  Vendors page header next to "Add vendor". Shows the
+  fetched/created/updated/errors summary inline after a sync.
+
+**Daryl's real vendor data captured into dev:**
+- Daryl sent over contact info (phone, email, contact preference,
+  payment terms) and trade specializations for 12 of his real
+  sub-vendors. All 12 already existed as synthetic
+  `admin+N@brenkfacilityservices.com` rows from the prior SC sync —
+  matched them by id and filled in real data.
+- New idempotent `scripts/seed_daryl_vendor_contacts.py` is the
+  authoritative record of how the data was applied. Safe to re-run.
+
+**`vendors.service_area` column added:**
+- Daryl asked us to track geographic reach. Brenk services the Austin
+  + San Antonio corridor; some vendors travel anywhere, some are
+  locked to a specific area (OH Door Longview = Longview only). New
+  nullable text column captures the free-text answer.
+- Alembic migration, model, Pydantic schemas, frontend types,
+  VendorFormModal input (paired with Payment terms in a 2-col row),
+  Vendors table column, vendor detail Profile field. Seeded all 12 of
+  Daryl's vendors with their area.
+
+**Daryl's trade vocabulary now lives alongside SC's:**
+- Daryl writes "Plumber" not "PLUMBING", "Window and Glass Repair" not
+  "WINDOWS/GLASS". Created 17 Brenk-custom trades (sc_trade_id NULL)
+  matching his exact phrasing in Title Case, and reassigned every one
+  of his 12 vendors to those. The SC catalog trades (PLUMBING,
+  ELECTRICAL, etc.) stay around for future work-order auto-tagging.
+- Three custom trades created in an earlier seed pass (WINDOWS/GLASS,
+  BACKFLOW, DRYWALL) were renamed in place to their Daryl-labeled
+  equivalents so we don't leave orphan rows in the trades picker.
+
+**Sandbox → production cutover prep:**
+- New `scripts/export_vendors_for_cutover.py` dumps every vendor row
+  + their trade specializations + Brenk-only custom trades as a single
+  portable SQL script. Pipe to `psql "$PROD_DATABASE_URL" < vendors.sql`
+  at cutover, then click "Sync from ServiceChannel" — the email-
+  fallback in the sync service reconciles each row to its production
+  SC user id without losing Daryl's curated notes.
+- The export excludes environment-local columns (id, sc_user_id,
+  sc_provider_id, raw_data, created_at, updated_at). Vendors with
+  trades use a `WITH new_vendor AS (... RETURNING id) INSERT INTO
+  vendor_trades ...` CTE so the script doesn't depend on prod's trade
+  ids matching dev's. Custom trades use
+  `INSERT ... ON CONFLICT (name) DO NOTHING` for re-run safety.
+
+**Dev-env IPv4 fix:**
+- After a backend restart mid-session, Work Orders page broke with
+  `fetch failed → ECONNREFUSED`. Cause: Node's undici resolves
+  `localhost` to `::1` (IPv6) first but uvicorn binds to IPv4 only.
+- Pinned `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` in `.env.local`
+  and documented the trap in `.env.local.example`.
+
+**LICENSE cleanup:**
+- Resolved a stale `<<<<<<< HEAD` merge marker block in LICENSE.
+  Kept the proprietary text (deleted the MIT alternative). The file
+  is now clean.
+
+### Decisions & Observations
+
+- **No more probing SC for assignment data.** v3 doesn't expose it.
+  The Brenk-native `work_orders.assigned_vendor_id` is the only
+  source of truth going forward; SC users are *just identity seeds.*
+- **Email-fallback is load-bearing for prod cutover.** Without it,
+  Daryl's curated notes/markup/payment-terms would be stranded on
+  dev rows when the production SC sync invents fresh `sc_user_id`s
+  for the same people. The export script + email-fallback together
+  make the sandbox-to-prod migration low-risk.
+- **Daryl's trade vocabulary wins over SC's.** SC's catalog uses
+  ALL-CAPS service-line labels; Daryl talks in plain English
+  ("Plumber", "Sheet Rock Repair"). The dashboard should read in
+  Daryl's voice, not SC's. Brenk-custom trades coexist with the SC
+  catalog — if the picker gets noisy we can group/sort or add an
+  archive flag later.
+- **`service_area` is free text, not an enum.** Too varied (and too
+  early) to enumerate. Most vendors land on "Austin & San Antonio";
+  the outliers ("Anywhere", "Longview only") need exactly the
+  granularity the operator wants to give them.
+- **`localhost` is a trap in Node 22.** Always pin
+  `NEXT_PUBLIC_API_URL` to `127.0.0.1` for local dev — the dual-stack
+  fallback in undici will lose you 20 minutes the first time it bites.
+- **One-off scripts in `backend/scripts/` are valuable artifacts.**
+  Two new this session — `seed_daryl_vendor_contacts.py` and
+  `export_vendors_for_cutover.py` — document operational decisions
+  in executable form. They're committed to the repo on purpose.
+
+### Up Next
+
+1. **Dashboard pipeline funnel.** Replace the placeholder home page
+   with the Tailwind UI cashflow-style stat layout: counts at each
+   pipeline stage (pink / yellow / yellow+👤 / yellow+💬 / orange /
+   green / green+💵 / invoiced) with avg-age callouts, plus a
+   "Stuck right now" panel surfacing WOs sitting too long in any
+   stage.
+2. **Invoice queue.** Tabbed list ("Ready to mark up" / "Marked up,
+   ready to send" / "Sent" / "Paid") + invoice detail layout (Tailwind
+   UI invoice template). This is Sue's-clipboard replacement and
+   directly addresses Daryl's biggest "WO got lost" failure mode.
+3. **Markup helper.** Settings page captures Daryl's markup-board
+   reference (per-trade defaults? Per-vendor defaults? Just notes?
+   Open question for Daryl). Surfaces inline on the invoice-detail
+   view.
+4. **Junction table for multi-vendor assignment.** Today's model is
+   a single `assigned_vendor_id` on the WO — fine for now, but Daryl
+   sometimes splits one WO across two trades (locksmith + electrical,
+   say). Schema migration to a `wo_vendor_assignments` join table
+   when the funnel work surfaces the need.
+5. **Production cutover.** Spin up the second free-tier Supabase
+   project, run `alembic upgrade head`, run the worker once to seed
+   `trades` and `vendors` from prod SC, then
+   `python scripts/export_vendors_for_cutover.py | psql "$PROD..."`
+   and click Sync. Targeting end of Phase 1.
+
+### Open questions for the next session
+
+- How does Daryl want to express his markup-board rules?
+  Static reference card editable in Settings? Per-trade default %?
+  Per-vendor default? Just notes he can refer to? — still open from
+  prior sessions, becomes blocking when we start the invoice queue.
+- Should the trades picker visually group Brenk-custom vs SC-catalog
+  trades, or sort them together alphabetically? Worth a UX call once
+  Daryl has actually used it.
+
+---
+
 ## Session: May 18, 2026 — ~4.5 hours
 
 First real day on the dashboard. By the end of the session a signed-in

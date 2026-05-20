@@ -123,6 +123,13 @@ class Vendor(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     sc_provider_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
+    """Legacy: SC provider id. Not used by current sync flows."""
+
+    sc_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
+    """SC user id (from /v3/odata/users). Set by `sync_vendors_from_sc` —
+    when present, this row's identity is synced from SC. NULL means a
+    Brenk-only vendor that the user added manually via the dashboard."""
+
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(50))
     email: Mapped[str | None] = mapped_column(String(255))
@@ -136,6 +143,12 @@ class Vendor(Base, TimestampMixin):
 
     payment_terms: Mapped[str | None] = mapped_column(String(100))
     """Free text — 'invoices weekly', 'hourly', 'flat per job', etc."""
+
+    service_area: Mapped[str | None] = mapped_column(String(255))
+    """Where the vendor will travel. Free text since the granularity
+    varies — 'Austin & San Antonio', 'Anywhere', 'Longview only',
+    'Austin metro', etc. Brenk's own service footprint is the Austin
+    + San Antonio corridor; defaults are written with that in mind."""
 
     mobile_app_capable: Mapped[bool | None] = mapped_column(Boolean)
     """Whether the vendor uses CubeSmart's mobile app for check-in /

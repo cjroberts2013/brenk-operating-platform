@@ -17,6 +17,13 @@ import type {
   WorkOrderUpdate,
 } from './types'
 
+export type VendorSyncSummary = {
+  fetched: number
+  created: number
+  updated: number
+  errors: number
+}
+
 export function listVendors(
   params: VendorListParams = {},
 ): Promise<VendorListResponse> {
@@ -46,6 +53,12 @@ export function updateVendor(
 
 export function deleteVendor(id: number): Promise<void> {
   return apiFetchVoid(`/api/v1/vendors/${id}`, { method: 'DELETE' })
+}
+
+export function syncVendorsFromSc(): Promise<VendorSyncSummary> {
+  return apiFetch<VendorSyncSummary>('/api/v1/vendors/sync', {
+    method: 'POST',
+  })
 }
 
 export function patchWorkOrder(

@@ -37,6 +37,7 @@ class VendorBase(BaseModel):
 
     contact_preference: _CONTACT_PREFERENCE | None = None
     payment_terms: str | None = Field(default=None, max_length=100)
+    service_area: str | None = Field(default=None, max_length=255)
     mobile_app_capable: bool | None = None
     markup_notes: str | None = None
     communication_notes: str | None = None
@@ -66,6 +67,7 @@ class VendorUpdate(BaseModel):
 
     contact_preference: _CONTACT_PREFERENCE | None = None
     payment_terms: str | None = Field(default=None, max_length=100)
+    service_area: str | None = Field(default=None, max_length=255)
     mobile_app_capable: bool | None = None
     markup_notes: str | None = None
     communication_notes: str | None = None
@@ -91,6 +93,7 @@ class VendorSummary(_OrmModel):
     is_active: bool
     contact_preference: str | None
     payment_terms: str | None
+    service_area: str | None
     mobile_app_capable: bool | None
     markup_notes: str | None
     communication_notes: str | None
@@ -113,6 +116,7 @@ class VendorDetail(_OrmModel):
 
     contact_preference: str | None
     payment_terms: str | None
+    service_area: str | None
     mobile_app_capable: bool | None
     markup_notes: str | None
     communication_notes: str | None

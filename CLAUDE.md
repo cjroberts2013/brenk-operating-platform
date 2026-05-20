@@ -107,13 +107,30 @@ stays public and the dashboard stays locked.
   typed `ApiError` on non-2xx
 - Work Orders list page (`/work-orders`) — filterable, paginated, color-coded
 - Work Order detail page (`/work-orders/[id]`) — two-column layout with
-  Details + Notes timeline + Workflow checklist + SC deep-link
+  Details + Notes timeline + Workflow checklist + SC deep-link, plus
+  inline sub-vendor assignment
+- Vendors backend: expanded model (contact prefs, payment terms,
+  `service_area`, mobile-app capable, markup/comm notes, trade
+  specializations, `sc_user_id`), CRUD + `POST /api/v1/vendors/sync`
+- Vendor sync from SC: pulls `/v3/odata/users`, matches by
+  `sc_user_id` then by email (case-insensitive). Email-fallback is
+  load-bearing for the sandbox → production cutover.
+- Vendors page: list with sync-from-SC + add/edit modal (pill-chip
+  trade picker with search + create-trade-inline), per-vendor detail
+  page with monthly calendar of scheduled WOs
+- Daryl's 12 real sub-vendors' contact data + service areas + trade
+  specializations seeded into dev via
+  `backend/scripts/seed_daryl_vendor_contacts.py` (idempotent;
+  authoritative record of how the data was applied)
 
 **Not yet done:**
-- Vendors backend (schema migration + CRUD endpoints) and frontend page
 - Dashboard pipeline-funnel home page (currently placeholder)
 - Invoice queue page (replaces Sue's clipboard)
-- Per-vendor calendar view
+- Markup helper / Settings page (Daryl's markup-board rules)
+- Junction table for multi-vendor-per-WO (current model is single
+  `assigned_vendor_id`; deferred until pipeline funnel surfaces the need)
+- Production Supabase cutover (export script ready at
+  `backend/scripts/export_vendors_for_cutover.py`)
 - Deployment to Fly.io / Vercel
 - 10 pre-existing ruff errors in legacy backend files
 
@@ -221,37 +238,49 @@ python scripts/test_sc_auth.py
 
 ## What To Work On Next
 
-Auth + Work Orders list + Work Order detail are done. The next chunk
-is **Vendors** — needed before the Sub-vendor-assigned stage on the WO
-detail page can move from "Not tracked yet" to interactive. Steps in
-order:
+Vendors (backend + page + sync + assignment) is done. Daryl's real
+contact data + service areas + trade vocabulary are now in dev. Next
+chunk is the **Dashboard pipeline funnel** and the **Invoice queue** —
+the two pages that directly attack Daryl's "WO got lost" failure modes.
 
-1. **Vendors backend.** Expand the `vendors` table with the fields
-   captured in the Dashboard Plan (contact preference, payment terms,
-   mobile-app capability, markup notes, communication notes, trade
-   specializations). Alembic migration + new
-   `GET/POST/PATCH/DELETE /api/v1/vendors` endpoints. Plus a
-   `vendor_id` write endpoint on work orders (or `PATCH /work-orders/{id}`
-   with a `assigned_vendor_id` field) so the WO detail page can
-   actually assign.
-2. **Vendors page.** List view (name, phone, # active WOs, last
-   assigned), per-vendor detail with their open WOs + a Tailwind UI
-   calendar view of scheduled WOs, add/edit modal.
-3. **Wire vendor assignment into the WO detail workflow checklist.**
-4. **Dashboard pipeline funnel.** Replaces the placeholder home page.
-5. **Invoice queue.** Tabbed list (Ready to mark up / Marked up /
-   Sent / Paid) with a Tailwind UI invoice-detail layout per WO. This
-   is the "Sue's clipboard" replacement.
+1. **Dashboard pipeline funnel.** Replaces the placeholder home page.
+   Tailwind UI cashflow-dashboard layout: stat tiles for each lifecycle
+   stage (pink / yellow / yellow+👤 / yellow+💬 / orange / green /
+   green+💵 / invoiced) with counts + average age, plus a "Stuck right
+   now" panel listing WOs sitting too long in any stage.
+2. **Invoice queue.** Tabbed list — "Ready to mark up" / "Marked up,
+   ready to send" / "Sent" / "Paid". Invoice detail view matches
+   Tailwind UI's invoice template (line items, totals, activity).
+   This is Sue's-clipboard replacement and directly unloads the
+   biggest current admin burden.
+3. **Markup helper.** Settings page captures Daryl's markup-board
+   reference (per-trade defaults? Per-vendor defaults? Just notes?
+   Open question for Daryl). Surfaces inline on invoice-detail.
+4. **Junction table for multi-vendor-per-WO.** Today's model is a
+   single `assigned_vendor_id`. Daryl sometimes splits one WO across
+   two trades (locksmith + electrical, say) — migrate to a
+   `wo_vendor_assignments` join table when the funnel work surfaces
+   the need.
+5. **Production cutover.** Spin up the second free-tier Supabase
+   project, `alembic upgrade head`, run the worker once to seed
+   `trades` and `vendors` from prod SC, then
+   `python scripts/export_vendors_for_cutover.py | psql "$PROD..."`
+   and click "Sync from ServiceChannel". Targeting end of Phase 1.
 
-**Open question for the next session:** does Charles have an existing
-vendor list to import, or do we start with an empty Vendors table?
+**Open questions for the next session:**
+- How does Daryl want to express his markup-board rules? Static
+  reference card editable in Settings? Per-trade default %?
+  Per-vendor default %? Just free-text notes he can refer to?
+  Becomes blocking when we start the invoice queue.
+- Should the trades picker visually group Brenk-custom vs SC-catalog
+  trades, or sort alphabetically together? Worth a UX call after
+  Daryl actually uses it.
 
 **Other items still deferred:**
 - ~10 pre-existing ruff errors in `config.py`, `migrations/env.py`,
   and the autogenerated initial migration.
-- Fly.io deployment exercise (configs already exist).
-- `LICENSE` leftover merge-conflict markers in the working tree.
-- Local `main` is ~16 commits ahead of `origin/main` — push when
+- Fly.io / Vercel deployment exercise (configs already exist).
+- Local `main` is many commits ahead of `origin/main` — push when
   you're ready (won't push without an explicit ask).
 
 ## Dashboard Plan (Phase 1 frontend)

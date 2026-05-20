@@ -112,6 +112,7 @@ export default async function VendorDetailPage({
             value={formatContact(vendor.contact_preference)}
           />
           <Field label="Payment terms" value={vendor.payment_terms} />
+          <Field label="Service area" value={vendor.service_area} />
           <Field
             label="Mobile-app capable"
             value={formatMobileApp(vendor.mobile_app_capable)}

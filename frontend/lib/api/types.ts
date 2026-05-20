@@ -146,6 +146,7 @@ export type VendorSummary = {
   is_active: boolean
   contact_preference: string | null
   payment_terms: string | null
+  service_area: string | null
   mobile_app_capable: boolean | null
   markup_notes: string | null
   communication_notes: string | null
@@ -164,6 +165,7 @@ export type VendorDetail = {
 
   contact_preference: string | null
   payment_terms: string | null
+  service_area: string | null
   mobile_app_capable: boolean | null
   markup_notes: string | null
   communication_notes: string | null
@@ -198,6 +200,7 @@ export type VendorCreate = {
   is_active?: boolean
   contact_preference?: VendorContactPreference | null
   payment_terms?: string | null
+  service_area?: string | null
   mobile_app_capable?: boolean | null
   markup_notes?: string | null
   communication_notes?: string | null

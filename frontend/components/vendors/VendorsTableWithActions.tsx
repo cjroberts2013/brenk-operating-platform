@@ -11,6 +11,7 @@ import {
 import { deleteVendorAction } from '@/app/(app)/vendors/actions'
 import type { TradeRef, VendorSummary } from '@/lib/api/types'
 
+import { SyncFromScButton } from './SyncFromScButton'
 import { VendorFormModal } from './VendorFormModal'
 
 export function VendorsTableWithActions({
@@ -38,7 +39,8 @@ export function VendorsTableWithActions({
 
   return (
     <>
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SyncFromScButton />
         <button
           type="button"
           onClick={openCreate}
@@ -66,6 +68,7 @@ export function VendorsTableWithActions({
                   <Th>Phone</Th>
                   <Th>Contact</Th>
                   <Th>Payment terms</Th>
+                  <Th>Service area</Th>
                   <Th>Trades</Th>
                   <Th align="right">Active WOs</Th>
                   <Th align="right">Actions</Th>
@@ -98,6 +101,7 @@ export function VendorsTableWithActions({
                     <Td>{vendor.phone ?? '—'}</Td>
                     <Td>{formatContact(vendor.contact_preference)}</Td>
                     <Td>{vendor.payment_terms ?? '—'}</Td>
+                    <Td>{vendor.service_area ?? '—'}</Td>
                     <Td>
                       {vendor.trade_specializations.length === 0 ? (
                         <span className="text-gray-400">—</span>

@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { ApiError } from '@/lib/api/server'
 import { createTrade } from '@/lib/api/trades'
 import * as vendorsApi from '@/lib/api/vendors'
+import type { VendorSyncSummary } from '@/lib/api/vendors'
 import type {
   TradeRef,
   VendorContactPreference,
@@ -67,6 +68,7 @@ function buildPayloadFromForm(formData: FormData): VendorCreate {
     is_active: formData.get('is_active') === 'on',
     contact_preference,
     payment_terms: get('payment_terms'),
+    service_area: get('service_area'),
     mobile_app_capable,
     markup_notes: get('markup_notes'),
     communication_notes: get('communication_notes'),
@@ -137,6 +139,21 @@ export async function createTradeAction(
   try {
     const trade = await createTrade(trimmed)
     return { trade }
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+}
+
+
+export async function syncVendorsAction(): Promise<{
+  summary?: VendorSyncSummary
+  error?: string
+}> {
+  try {
+    const summary = await vendorsApi.syncVendorsFromSc()
+    revalidatePath('/vendors')
+    return { summary }
   } catch (err) {
     if (err instanceof ApiError) return { error: err.detail }
     throw err
