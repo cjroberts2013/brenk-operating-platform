@@ -77,18 +77,23 @@ class VendorUpdate(BaseModel):
 
 
 class VendorSummary(_OrmModel):
-    """List-view shape. Adds an `active_work_orders` count alongside the
-    profile fields most useful for the table view.
+    """List-view shape. Carries enough fields that the Edit modal can
+    pre-fill without a separate detail fetch (the textarea fields and
+    other secondary text are small enough that it's worth the extra
+    bytes).
     """
 
     id: int
     name: str
     phone: str | None
     email: str | None
+    notes: str | None
     is_active: bool
     contact_preference: str | None
     payment_terms: str | None
     mobile_app_capable: bool | None
+    markup_notes: str | None
+    communication_notes: str | None
     active_work_orders: int
     trade_specializations: list[TradeRef]
 

@@ -50,10 +50,13 @@ function toQuery(params: Record<string, unknown>): string {
   return qs ? `?${qs}` : ''
 }
 
-export async function apiFetch<T>(
-  path: string,
-  init: { params?: Record<string, unknown>; method?: string; body?: unknown } = {},
-): Promise<T> {
+type ApiInit = {
+  params?: Record<string, unknown>
+  method?: string
+  body?: unknown
+}
+
+async function _request(path: string, init: ApiInit): Promise<Response> {
   const token = await getAccessToken()
   if (!token) {
     // Should be impossible — the proxy would have redirected — but
@@ -88,5 +91,15 @@ export async function apiFetch<T>(
     throw new ApiError(response.status, detail)
   }
 
+  return response
+}
+
+export async function apiFetch<T>(path: string, init: ApiInit = {}): Promise<T> {
+  const response = await _request(path, init)
   return (await response.json()) as T
+}
+
+/** Variant for endpoints that return 204 or otherwise have no body. */
+export async function apiFetchVoid(path: string, init: ApiInit = {}): Promise<void> {
+  await _request(path, init)
 }

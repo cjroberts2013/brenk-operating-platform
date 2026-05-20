@@ -49,6 +49,10 @@ async def list_work_orders(
     ] = None,
     client_id: Annotated[int | None, Query(description="Filter by internal client id")] = None,
     trade_id: Annotated[int | None, Query(description="Filter by internal trade id")] = None,
+    assigned_vendor_id: Annotated[
+        int | None,
+        Query(description="Filter by assigned Brenk sub-vendor"),
+    ] = None,
     updated_since: Annotated[
         datetime | None,
         Query(description="Only return WOs with sc_updated_date >= this ISO 8601 timestamp"),
@@ -72,6 +76,8 @@ async def list_work_orders(
         filters.append(WorkOrder.client_id == client_id)
     if trade_id is not None:
         filters.append(WorkOrder.trade_id == trade_id)
+    if assigned_vendor_id is not None:
+        filters.append(WorkOrder.assigned_vendor_id == assigned_vendor_id)
     if updated_since is not None:
         filters.append(WorkOrder.sc_updated_date >= updated_since)
 

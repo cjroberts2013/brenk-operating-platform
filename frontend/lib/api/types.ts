@@ -125,7 +125,89 @@ export type WorkOrderListParams = {
   status?: string
   client_id?: number
   trade_id?: number
+  assigned_vendor_id?: number
   updated_since?: string // ISO 8601
   page?: number
   page_size?: number
+}
+
+// =============================================================================
+// Vendors
+// =============================================================================
+
+export type VendorContactPreference = 'sms' | 'call' | 'email' | 'other'
+
+export type VendorSummary = {
+  id: number
+  name: string
+  phone: string | null
+  email: string | null
+  notes: string | null
+  is_active: boolean
+  contact_preference: string | null
+  payment_terms: string | null
+  mobile_app_capable: boolean | null
+  markup_notes: string | null
+  communication_notes: string | null
+  active_work_orders: number
+  trade_specializations: TradeRef[]
+}
+
+export type VendorDetail = {
+  id: number
+  sc_provider_id: number | null
+  name: string
+  phone: string | null
+  email: string | null
+  notes: string | null
+  is_active: boolean
+
+  contact_preference: string | null
+  payment_terms: string | null
+  mobile_app_capable: boolean | null
+  markup_notes: string | null
+  communication_notes: string | null
+
+  trade_specializations: TradeRef[]
+  active_work_orders: number
+
+  created_at: string
+  updated_at: string
+}
+
+export type VendorListResponse = {
+  items: VendorSummary[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type VendorListParams = {
+  is_active?: boolean
+  trade_id?: number
+  page?: number
+  page_size?: number
+}
+
+/** Shape of the body for POST /api/v1/vendors. */
+export type VendorCreate = {
+  name: string
+  phone?: string | null
+  email?: string | null
+  notes?: string | null
+  is_active?: boolean
+  contact_preference?: VendorContactPreference | null
+  payment_terms?: string | null
+  mobile_app_capable?: boolean | null
+  markup_notes?: string | null
+  communication_notes?: string | null
+  trade_ids?: number[]
+}
+
+/** Shape of the body for PATCH /api/v1/vendors/{id}. All fields optional. */
+export type VendorUpdate = Partial<VendorCreate>
+
+/** Shape of the body for PATCH /api/v1/work-orders/{id}. */
+export type WorkOrderUpdate = {
+  assigned_vendor_id?: number | null
 }

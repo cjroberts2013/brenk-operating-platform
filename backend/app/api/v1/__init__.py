@@ -7,9 +7,10 @@ deployment health probes.
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.endpoints import vendors, work_orders
+from app.api.v1.endpoints import trades, vendors, work_orders
 from app.core.auth import get_current_user
 
 api_router = APIRouter(dependencies=[Depends(get_current_user)])
 api_router.include_router(work_orders.router, prefix="/work-orders", tags=["work-orders"])
 api_router.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
+api_router.include_router(trades.router, prefix="/trades", tags=["trades"])

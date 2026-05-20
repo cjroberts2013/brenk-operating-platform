@@ -7,6 +7,8 @@
  * vendor model and invoice queue ship.
  */
 
+import type { ReactNode } from 'react'
+
 import {
   CheckCircleIcon as CheckCircleSolid,
 } from '@heroicons/react/24/solid'
@@ -25,6 +27,11 @@ type Stage = {
   state: StageState
   detail?: string
 }
+
+/** Stage labels that the parent can replace with custom interactive
+ * UI (e.g. the vendor-assignment dropdown). Listed centrally so a
+ * typo in a label string doesn't silently break the slot wiring. */
+const SUB_VENDOR_STAGE_LABEL = 'Sub-vendor assigned'
 
 function isCompleted(status: string): boolean {
   return status.toUpperCase().includes('COMPLETED')
@@ -124,7 +131,15 @@ function StageIcon({ state }: { state: StageState }) {
   )
 }
 
-export function WorkflowChecklist({ wo }: { wo: WorkOrderDetail }) {
+export function WorkflowChecklist({
+  wo,
+  vendorControl,
+}: {
+  wo: WorkOrderDetail
+  /** Optional interactive widget rendered in the "Sub-vendor assigned"
+   * row. When present, replaces the row's detail text. */
+  vendorControl?: ReactNode
+}) {
   const stages = deriveStages(wo)
 
   return (
@@ -138,35 +153,49 @@ export function WorkflowChecklist({ wo }: { wo: WorkOrderDetail }) {
         </p>
       </header>
       <ul role="list" className="divide-y divide-gray-200 dark:divide-white/10">
-        {stages.map((stage) => (
-          <li
-            key={stage.label}
-            className="flex items-start gap-3 px-4 py-2.5 text-sm"
-          >
-            <StageIcon state={stage.state} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span
-                  className={
-                    stage.state === 'done'
-                      ? 'font-medium text-gray-900 dark:text-white'
-                      : 'text-gray-500 dark:text-gray-400'
-                  }
-                >
-                  {stage.label}
-                </span>
-                <span className="rounded-sm bg-gray-100 px-1.5 py-px text-[10px] font-medium text-gray-500 uppercase dark:bg-white/5 dark:text-gray-400">
-                  {stage.source}
-                </span>
+        {stages.map((stage) => {
+          const isVendorStage =
+            stage.label === SUB_VENDOR_STAGE_LABEL && vendorControl
+          return (
+            <li
+              key={stage.label}
+              className="flex items-start gap-3 px-4 py-2.5 text-sm"
+            >
+              <StageIcon
+                state={
+                  // When the vendor control is present and the WO has
+                  // someone assigned, mark this stage done regardless of
+                  // what the static deriveStages logic returned.
+                  isVendorStage && wo.assigned_vendor ? 'done' : stage.state
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={
+                      stage.state === 'done' ||
+                      (isVendorStage && wo.assigned_vendor)
+                        ? 'font-medium text-gray-900 dark:text-white'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }
+                  >
+                    {stage.label}
+                  </span>
+                  <span className="rounded-sm bg-gray-100 px-1.5 py-px text-[10px] font-medium text-gray-500 uppercase dark:bg-white/5 dark:text-gray-400">
+                    {stage.source}
+                  </span>
+                </div>
+                {isVendorStage ? (
+                  <div className="mt-1">{vendorControl}</div>
+                ) : stage.detail ? (
+                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {stage.detail}
+                  </p>
+                ) : null}
               </div>
-              {stage.detail ? (
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {stage.detail}
-                </p>
-              ) : null}
-            </div>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

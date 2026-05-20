@@ -114,10 +114,13 @@ def _to_summary(vendor: Vendor, active_count: int) -> VendorSummary:
         name=vendor.name,
         phone=vendor.phone,
         email=vendor.email,
+        notes=vendor.notes,
         is_active=vendor.is_active,
         contact_preference=vendor.contact_preference,
         payment_terms=vendor.payment_terms,
         mobile_app_capable=vendor.mobile_app_capable,
+        markup_notes=vendor.markup_notes,
+        communication_notes=vendor.communication_notes,
         trade_specializations=vendor.trade_specializations,  # type: ignore[arg-type]
         active_work_orders=active_count,
     )

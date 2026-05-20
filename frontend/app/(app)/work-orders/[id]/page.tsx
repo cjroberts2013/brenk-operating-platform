@@ -5,8 +5,10 @@ import { ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/20/so
 
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
+import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
 import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
 import { ApiError } from '@/lib/api/server'
+import { listVendors } from '@/lib/api/vendors'
 import {
   getWorkOrder,
   listWorkOrderNotes,
@@ -26,13 +28,21 @@ export default async function WorkOrderDetailPage({
   const id = Number(idStr)
   if (!Number.isFinite(id) || id < 1) notFound()
 
-  // Fetch WO + notes in parallel. If the WO doesn't exist the backend
-  // returns 404 on `getWorkOrder` first; trigger Next's notFound() so
-  // the framework serves its 404 page instead of an unhandled error.
+  // Fetch WO + notes + active vendors in parallel. If the WO doesn't
+  // exist the backend returns 404 on `getWorkOrder`; trigger Next's
+  // notFound() so the framework serves its 404 page instead of bubbling
+  // an unhandled error. The vendor list is best-effort — if it fails,
+  // we still render the WO and just show "Unassigned" without a
+  // dropdown.
   let wo
   let notes
+  let activeVendors
   try {
-    ;[wo, notes] = await Promise.all([getWorkOrder(id), listWorkOrderNotes(id)])
+    ;[wo, notes, activeVendors] = await Promise.all([
+      getWorkOrder(id),
+      listWorkOrderNotes(id),
+      listVendors({ is_active: true, page_size: 200 }),
+    ])
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound()
     throw err
@@ -145,7 +155,16 @@ export default async function WorkOrderDetailPage({
 
         {/* Right rail: workflow + meta */}
         <div className="space-y-6">
-          <WorkflowChecklist wo={wo} />
+          <WorkflowChecklist
+            wo={wo}
+            vendorControl={
+              <VendorAssignmentControl
+                workOrderId={wo.id}
+                currentVendor={wo.assigned_vendor}
+                activeVendors={activeVendors.items}
+              />
+            }
+          />
 
           <section className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
             <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
