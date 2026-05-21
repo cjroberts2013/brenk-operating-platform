@@ -8,6 +8,191 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 20–21, 2026 — ~3 hours
+
+Polish session on the Work Orders + Vendors views: dial back the SC
+sync cadence, add a manual "Sync now" trigger + last-synced status
+line, and wire the dashboard's top-bar search up to real list-page
+filtering.
+
+### Accomplishments
+
+**Sync cadence: every 5 min → hourly.**
+- `backend/app/workers/tasks.py`: changed
+  `@procrastinate_app.periodic(cron="*/5 * * * *")` to
+  `cron="0 * * * *"`. Comment in-file explains the math (Brenk gets
+  ~8 WOs/day; 288 polls/day was massively over-spec; 24/day is friendly
+  to monthly network-call budgets and well under any SC throttle).
+- Configurable later by editing one line if Daryl's response time on
+  new WOs becomes a real concern.
+
+**Manual sync + last-synced display on `/work-orders`.**
+- Backend: `GET /api/v1/work-orders/sync-status` returns
+  `{ last_synced_at: datetime | null, work_order_count: int }`, derived
+  from `MAX(work_orders.last_synced_at)`. Cheap single query.
+- Backend: `POST /api/v1/work-orders/sync` runs the orchestrator
+  inline so the response carries `{fetched, upserted, notes_synced,
+  errors}`. Idempotent — same upserter as the periodic sync.
+- Route order matters: both new routes are registered above
+  `/{work_order_id}` so `sync-status` doesn't get matched as a
+  path param ("Input should be a valid integer, unable to parse
+  string as an integer" — see Decisions below).
+- Frontend `components/work-orders/SyncWorkOrdersButton.tsx`:
+  client component with `useTransition`, spinning icon while pending,
+  and a status-line companion that flips between four states —
+  *Last synced X minutes ago · auto-syncs every hour* /
+  *Pulling latest from ServiceChannel…* / *Synced 341 work orders ·
+  3 notes refreshed* / *Sync failed: …* — depending on whether a
+  manual run is in flight, just completed, or errored. Server action
+  `syncWorkOrdersAction` revalidates `/work-orders` after.
+- WO list page now fires `listWorkOrders` and `getWorkOrderSyncStatus`
+  in parallel via `Promise.all` so the extra endpoint is free
+  latency-wise.
+
+**Contextual top-bar search.**
+- New `components/ContextualSearch.tsx` replaces the dead Tailwind UI
+  search placeholder in the AppShell. Behavior:
+  - On `/work-orders` → placeholder *"Search work orders by #,
+    location, problem, caller…"*. Backend matches `sc_number`,
+    `sc_purchase_number`, `problem_code`, `caller`, `description`,
+    `location.store_id`, `location.name`, `client.name`,
+    `client.short_name`.
+  - On `/vendors` → *"Search vendors by name, phone, email, area,
+    trade…"*. Backend matches `name`, `phone`, `email`,
+    `service_area`, and the vendor's specialized trade names (via
+    a subquery so a multi-trade vendor doesn't duplicate rows).
+  - Other paths → search is hidden behind an invisible spacer so
+    the bell + user menu don't hop around.
+- 200ms keystroke debounce → `router.replace('?q=…')`. `replace` not
+  `push` so backspacing through 8 characters doesn't litter 8
+  entries in the back stack. Pagination resets when the search
+  changes.
+- URL-driven (`?q=…`), so refresh / back-forward / paste-link all
+  work. Server components read `searchParams.q` and re-fetch.
+- An ✕ icon appears once you've typed anything — one click clears.
+- Backend: added `q` query param to `GET /api/v1/work-orders/` and
+  `GET /api/v1/vendors/`. `ILIKE` for case-insensitive substring
+  (Postgres handles case folding natively — no `LOWER()` round-trip).
+- Verified search counts against live dev DB: `"plumb"` → 18 WOs,
+  `"350200"` → 1 WO by number, `"austin"` → 10 vendors,
+  `"512"` → 7 vendors by phone area code.
+
+**Race-condition fix in the search input.**
+- First cut of `ContextualSearch` would drop trailing characters
+  when typing fast: the debounce push would land an intermediate
+  URL while the user kept typing, then the resync-from-URL effect
+  would clobber the local input with the stale URL value.
+- Fix: track `lastPushedRef` (the last value WE pushed), and have
+  the resync effect skip when the incoming `urlValue` matches it.
+  External URL changes (pathname change, paste, back/forward) still
+  flow through because their value won't match the ref.
+
+**Better error surfacing in `lib/api/server.ts`.**
+- The original `apiFetch` only handled `detail` strings on error
+  bodies. FastAPI validation errors arrive as
+  `{detail: [{loc, msg, type}, …]}` — an array — so the old code
+  silently fell back to `"422 Unprocessable Content"` (just the
+  status text), hiding the real field-level reason.
+- Now flattens validation arrays into a readable
+  `query.q: Input should be a valid string` line, AND
+  `console.error`s the URL + status + detail on the server side
+  so dev-time failures are loud.
+- This caught the missing-`service_area` field-passthrough bug
+  the very next time it would have happened (see below).
+
+**`service_area` field-passthrough bug.**
+- Previous session added `service_area` to `VendorSummary` and
+  `VendorDetail` Pydantic schemas but missed two manual constructor
+  calls in `_to_summary` and `_to_detail` (`backend/app/api/v1/
+  endpoints/vendors.py`). Every call to `/api/v1/vendors/` returned
+  a Pydantic ValidationError during response construction.
+- The WO detail page calls `listVendors(...)` for its assignment
+  picker, so navigating to a WO crashed the page. The improved
+  error surfacing made the failing field obvious in one shot.
+- Fix: pass `service_area=vendor.service_area` in both helpers.
+  WO endpoints already use `WorkOrderDetail.model_validate(wo)`
+  (auto-picks new fields via `from_attributes=True`), which is the
+  safer pattern. The vendors endpoint is worth migrating to the
+  same pattern at some point.
+
+**Local dev gotcha caught + documented.**
+- Symptom: `[apiFetch] GET /api/v1/work-orders/sync-status → 422:
+  path.work_order_id: Input should be a valid integer, unable to
+  parse string as an integer.` Meaning: FastAPI tried to parse
+  `"sync-status"` as the `{work_order_id}` int.
+- Cause: uvicorn was running without `--reload`, so it never picked
+  up the new route declarations after the file edits. The new
+  literal `/sync-status` route was on disk but not in memory — the
+  request fell through to `/{work_order_id}`.
+- Fix: restarted uvicorn with `--reload`. Confirmed via the live
+  `/openapi.json` that the new routes registered correctly.
+
+### Decisions & Observations
+
+- **Hourly cron is the right floor for now.** SC's API doesn't
+  surface change-data-capture (no `updatedSince` we trust), so we
+  have to full-scan to catch new WOs. Every 5 min was burning
+  network and SC throttle budget for no operator benefit — Daryl
+  doesn't refresh that often anyway, and the manual "Sync now"
+  button handles the urgent-pull case.
+- **Route ordering still matters in FastAPI.** Literal routes need
+  to register above `/{param}` routes to avoid being swallowed by
+  path-param matching. Worth flagging in any future endpoint that
+  adds a sibling literal under a `{id}`-suffixed router.
+- **Contextual search > global search at this scale.** Considered a
+  global search-everything box, but on every list page the user is
+  really asking "narrow this list to what I care about," not "where
+  is this thing in the system." Contextual maps to that directly,
+  re-uses the existing `?q=` URL contract, and needs no new results
+  page. If Cmd+K-style global ever becomes necessary, it'd live
+  alongside as a separate affordance.
+- **`useTransition` around `router.replace` is the recommended
+  pattern,** but it's NOT what kept the input responsive during
+  fast typing — the input is controlled by local state via direct
+  `setValue` on `onChange`, which is high-priority and untouched
+  by the transition. The fast-typing bug was a state-overwrite
+  race, not an input-lag issue.
+- **Pydantic manual-constructor pattern is fragile.** Any time you
+  add a required field to a schema, every manual `Schema(...)`
+  constructor in the codebase needs updating in lock-step. Using
+  `Schema.model_validate(orm_obj)` with `from_attributes=True`
+  auto-picks new fields and is the safer pattern. Migrate the
+  vendors endpoint when we touch it next.
+- **Run uvicorn with `--reload` in dev.** Already documented in
+  `docs/runbooks/local-development.md`, but worth saying again
+  here — without it, every backend edit silently does nothing
+  until a manual restart, and the failure mode is exotic (FastAPI
+  matching against the OLD routing table while you stare at the
+  NEW source on disk).
+- **Surface API error details aggressively in dev.** The
+  `console.error` in `apiFetch` means the dev terminal now logs
+  every backend 4xx/5xx with the actual reason — no more
+  guessing what FastAPI is complaining about from a generic
+  status-text fallback.
+
+### Up Next
+
+Unchanged from the May 19 plan — the search + manual sync were
+polish work that fits between the Vendors-page completion and the
+Dashboard funnel. Next chunk is still:
+
+1. **Dashboard pipeline funnel** (replaces the placeholder home).
+2. **Invoice queue** (Sue's-clipboard replacement).
+3. **Markup helper / Settings page** (blocked on Daryl input on the
+   markup-board rule shape).
+4. **Multi-vendor-per-WO junction table** (when the funnel surfaces
+   the need).
+5. **Production cutover** (export script + email-fallback are ready).
+
+### Open questions still on the table
+
+- Markup-board rule shape (per-trade %, per-vendor %, free-text,
+  reference card?). Blocks the invoice queue.
+- Trades-picker grouping: Brenk-custom vs SC-catalog side-by-side
+  alphabetical, or grouped sections? Defer until Daryl uses it.
+
+---
+
 ## Session: May 19, 2026 — ~5 hours
 
 Closed the loop between SC's user list and Brenk's vendor records,

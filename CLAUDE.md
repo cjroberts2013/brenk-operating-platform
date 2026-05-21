@@ -93,6 +93,15 @@ stays public and the dashboard stays locked.
 - Notes sync with smart count-delta trigger
 - **Supabase JWT auth supports both HS256 (tests + legacy) and ES256/RS256
   via JWKS** — handles Supabase's modern asymmetric signing keys
+- Manual sync triggers: `POST /api/v1/work-orders/sync` and
+  `POST /api/v1/vendors/sync`, plus `GET /api/v1/work-orders/sync-status`
+  for the dashboard's "Last synced …" line
+- Scheduled WO sync runs **hourly** (was every 5 min — Brenk gets
+  ~8 WOs/day, hourly is plenty and is much friendlier on network
+  budgets)
+- Free-text `?q=` search param on `/api/v1/work-orders/` and
+  `/api/v1/vendors/` — case-insensitive substring match across the
+  columns an operator would type
 - 34 backend tests passing
 - Live data: ~341 work orders, ~2,000 notes in Supabase
 
@@ -122,6 +131,11 @@ stays public and the dashboard stays locked.
   specializations seeded into dev via
   `backend/scripts/seed_daryl_vendor_contacts.py` (idempotent;
   authoritative record of how the data was applied)
+- "Sync now" button + "Last synced X ago · auto-syncs every hour"
+  status line in the `/work-orders` page header
+- Contextual top-bar search: filters the current list page as you
+  type (debounced URL `?q=` push, race-condition-safe). Active on
+  `/work-orders` and `/vendors`, hidden on other paths.
 
 **Not yet done:**
 - Dashboard pipeline-funnel home page (currently placeholder)
@@ -468,6 +482,20 @@ branching feature requires the Pro plan, which we're not on.)
   conflict — current pins are intentionally loose for resolver speed
 - Don't introduce TypeScript code outside `frontend/`
 - Don't change the Python target version away from 3.13 without coordinating
+- Don't run uvicorn without `--reload` in dev. Without it, backend
+  source edits silently do nothing until a manual restart and the
+  failure mode is exotic — FastAPI matches against the stale routing
+  table while the new source sits on disk. The runbook documents the
+  correct invocation.
+- Don't add a literal route below `/{param}` in a FastAPI router.
+  Path-param routes match first by registration order, so a literal
+  registered after `/{work_order_id}` would be swallowed.
+- Don't construct Pydantic response models manually if you can avoid
+  it. `Schema.model_validate(orm_obj)` with `from_attributes=True`
+  auto-picks new fields when the schema gains them. Manual
+  `Schema(field=…)` constructors silently 500 the next time the
+  schema adds a required field unless every caller is updated in
+  lock-step.
 
 ## Communication With Charles
 

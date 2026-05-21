@@ -24,11 +24,21 @@ async def sync_work_orders() -> dict:
     return await sync_all_work_orders()
 
 
-@procrastinate_app.periodic(cron="*/5 * * * *")
+@procrastinate_app.periodic(cron="0 * * * *")
 @procrastinate_app.task(name="scheduled_sync_work_orders", queue="default")
 async def scheduled_sync_work_orders(timestamp: int) -> dict:
-    """Periodic sync trigger — runs every 5 minutes via Procrastinate's
-    built-in scheduler.
+    """Periodic sync trigger — runs hourly at the top of the hour via
+    Procrastinate's built-in scheduler.
+
+    Daryl can hit "Sync now" on the Work Orders page if he needs a
+    fresher read; the manual button calls `sync_work_orders` directly.
+
+    Rationale for hourly: SC issues ~8 new WOs/day for Brenk, so a
+    5-minute cadence was massive overkill — 288 polls/day to catch
+    8 WOs. Hourly drops that to 24/day per environment, well below
+    any SC throttle and friendly to monthly network-call budgets.
+    Adjust here if Daryl's reaction time on new requests becomes a
+    problem.
 
     The `timestamp` arg is passed by Procrastinate (Unix epoch of the
     scheduled tick) and is used here only for logging.

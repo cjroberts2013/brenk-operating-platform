@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache'
 
 import { ApiError } from '@/lib/api/server'
 import { patchWorkOrder } from '@/lib/api/vendors'
+import { syncWorkOrdersFromSc } from '@/lib/api/work-orders'
+import type { WorkOrderSyncSummary } from '@/lib/api/types'
 
 export type AssignVendorState = {
   error: string | null
@@ -45,4 +47,22 @@ export async function assignVendorAction(
   revalidatePath('/work-orders')
   revalidatePath('/vendors')
   return { error: null, attempt }
+}
+
+
+export async function syncWorkOrdersAction(): Promise<{
+  summary?: WorkOrderSyncSummary
+  error?: string
+}> {
+  try {
+    const summary = await syncWorkOrdersFromSc()
+    // Revalidate both the list (rows + last-sync header line) and any
+    // currently-open detail page.
+    revalidatePath('/work-orders')
+    revalidatePath('/work-orders/[id]', 'page')
+    return { summary }
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
 }

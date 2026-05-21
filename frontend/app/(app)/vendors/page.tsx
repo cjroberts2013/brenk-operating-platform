@@ -13,6 +13,11 @@ function parseBool(
   return undefined
 }
 
+function stringParam(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value
+  return raw && raw.length ? raw : undefined
+}
+
 export default async function VendorsPage({
   searchParams,
 }: {
@@ -20,6 +25,7 @@ export default async function VendorsPage({
 }) {
   const sp = await searchParams
   const is_active = parseBool(sp.is_active)
+  const q = stringParam(sp.q)
 
   // Default to "active only" unless the user explicitly asks otherwise.
   // Tracked in the URL so reloads + back/forward keep the same view.
@@ -29,6 +35,7 @@ export default async function VendorsPage({
     listVendors({
       page_size: 200,
       is_active: effectiveFilter,
+      ...(q ? { q } : {}),
     }),
     listTrades(),
   ])
@@ -43,7 +50,8 @@ export default async function VendorsPage({
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Brenk&apos;s sub-vendors. These do not propagate to
             ServiceChannel — they live in our database only.{' '}
-            {vendors.total} {effectiveFilter ? 'active' : 'inactive'}.
+            {vendors.total} {effectiveFilter ? 'active' : 'inactive'}
+            {q ? <> · matching <strong>“{q}”</strong></> : null}.
           </p>
         </div>
         <ActiveFilter current={is_active} />

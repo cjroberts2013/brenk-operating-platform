@@ -127,8 +127,21 @@ export type WorkOrderListParams = {
   trade_id?: number
   assigned_vendor_id?: number
   updated_since?: string // ISO 8601
+  q?: string
   page?: number
   page_size?: number
+}
+
+export type WorkOrderSyncStatus = {
+  last_synced_at: string | null // ISO 8601, UTC
+  work_order_count: number
+}
+
+export type WorkOrderSyncSummary = {
+  fetched: number
+  upserted: number
+  notes_synced: number
+  errors: number
 }
 
 // =============================================================================
@@ -187,6 +200,7 @@ export type VendorListResponse = {
 export type VendorListParams = {
   is_active?: boolean
   trade_id?: number
+  q?: string
   page?: number
   page_size?: number
 }

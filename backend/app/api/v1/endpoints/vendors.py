@@ -9,11 +9,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
-from sqlalchemy import func, select
+from pydantic import BaseModel
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
-from pydantic import BaseModel
 
 from app.db.session import get_async_db
 from app.models.work_order import Trade, Vendor, WorkOrder
@@ -35,6 +34,7 @@ class VendorSyncSummary(BaseModel):
     updated: int
     errors: int
 
+
 router = APIRouter()
 
 _TERMINAL_STATUSES = ("COMPLETED", "CANCELLED")
@@ -42,9 +42,7 @@ _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
 
 
-async def _active_counts(
-    db: AsyncSession, vendor_ids: list[int]
-) -> dict[int, int]:
+async def _active_counts(db: AsyncSession, vendor_ids: list[int]) -> dict[int, int]:
     """Return {vendor_id: count of non-terminal work orders assigned}.
 
     One grouped query for the whole batch — keeps the list endpoint
@@ -69,9 +67,7 @@ async def _load_trades(db: AsyncSession, trade_ids: list[int]) -> list[Trade]:
     if not trade_ids:
         return []
     unique_ids = list({*trade_ids})
-    rows = (
-        await db.execute(select(Trade).where(Trade.id.in_(unique_ids)))
-    ).scalars().all()
+    rows = (await db.execute(select(Trade).where(Trade.id.in_(unique_ids)))).scalars().all()
     found_ids = {t.id for t in rows}
     missing = [tid for tid in unique_ids if tid not in found_ids]
     if missing:
@@ -110,6 +106,7 @@ def _to_detail(vendor: Vendor, active_count: int) -> VendorDetail:
         is_active=vendor.is_active,
         contact_preference=vendor.contact_preference,
         payment_terms=vendor.payment_terms,
+        service_area=vendor.service_area,
         mobile_app_capable=vendor.mobile_app_capable,
         markup_notes=vendor.markup_notes,
         communication_notes=vendor.communication_notes,
@@ -130,6 +127,7 @@ def _to_summary(vendor: Vendor, active_count: int) -> VendorSummary:
         is_active=vendor.is_active,
         contact_preference=vendor.contact_preference,
         payment_terms=vendor.payment_terms,
+        service_area=vendor.service_area,
         mobile_app_capable=vendor.mobile_app_capable,
         markup_notes=vendor.markup_notes,
         communication_notes=vendor.communication_notes,
@@ -168,10 +166,17 @@ async def list_vendors(
         int | None,
         Query(description="Filter to vendors specializing in this trade"),
     ] = None,
+    q: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Free-text search across name, phone, email, service area, "
+                "and trade name. Case-insensitive, substring match."
+            ),
+        ),
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[
-        int, Query(ge=1, le=_MAX_PAGE_SIZE)
-    ] = _DEFAULT_PAGE_SIZE,
+    page_size: Annotated[int, Query(ge=1, le=_MAX_PAGE_SIZE)] = _DEFAULT_PAGE_SIZE,
 ) -> VendorListResponse:
     """List vendors, ordered alphabetically by name."""
     filters = []
@@ -180,9 +185,24 @@ async def list_vendors(
     if trade_id is not None:
         filters.append(
             Vendor.id.in_(
-                select(Vendor.id)
-                .join(Vendor.trade_specializations)
-                .where(Trade.id == trade_id)
+                select(Vendor.id).join(Vendor.trade_specializations).where(Trade.id == trade_id)
+            )
+        )
+    if q is not None and q.strip():
+        needle = f"%{q.strip()}%"
+        # Vendor.id IN (vendors who match by their own field OR by a
+        # specialized-trade name). Done as a subquery so the outer
+        # paginated query doesn't grow rows per trade-match.
+        trade_match_ids = (
+            select(Vendor.id).join(Vendor.trade_specializations).where(Trade.name.ilike(needle))
+        )
+        filters.append(
+            or_(
+                Vendor.name.ilike(needle),
+                Vendor.phone.ilike(needle),
+                Vendor.email.ilike(needle),
+                Vendor.service_area.ilike(needle),
+                Vendor.id.in_(trade_match_ids),
             )
         )
 

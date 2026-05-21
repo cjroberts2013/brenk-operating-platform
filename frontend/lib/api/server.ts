@@ -84,10 +84,28 @@ async function _request(path: string, init: ApiInit): Promise<Response> {
     let detail = `${response.status} ${response.statusText}`
     try {
       const body = await response.json()
-      if (typeof body?.detail === 'string') detail = body.detail
+      if (typeof body?.detail === 'string') {
+        detail = body.detail
+      } else if (Array.isArray(body?.detail)) {
+        // FastAPI validation errors arrive as an array of objects like
+        // `{loc: ["query", "q"], msg: "...", type: "..."}`. Flatten into
+        // a one-line readable string instead of swallowing the detail.
+        detail = body.detail
+          .map((e: { loc?: unknown[]; msg?: string }) => {
+            const where = Array.isArray(e.loc) ? e.loc.join('.') : '?'
+            return `${where}: ${e.msg ?? 'invalid'}`
+          })
+          .join(' · ')
+      }
     } catch {
       // Body wasn't JSON; fall back to status text.
     }
+    // Log on the server so we can see request URL + detail in the
+    // dev console, separate from whatever the page does with the
+    // thrown ApiError.
+    console.error(
+      `[apiFetch] ${init.method ?? 'GET'} ${url} → ${response.status}: ${detail}`,
+    )
     throw new ApiError(response.status, detail)
   }
 

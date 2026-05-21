@@ -11,18 +11,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_async_db
-from app.models.work_order import Vendor, WorkOrder, WorkOrderNote
+from app.models.work_order import Client, Location, Vendor, WorkOrder, WorkOrderNote
 from app.schemas.work_order import (
     WorkOrderDetail,
     WorkOrderListResponse,
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
+from app.services.sync.work_orders import sync_all_work_orders
 
 
 class WorkOrderUpdate(BaseModel):
@@ -32,6 +33,28 @@ class WorkOrderUpdate(BaseModel):
     """
 
     assigned_vendor_id: int | None = None
+
+
+class WorkOrderSyncStatus(BaseModel):
+    """When the work-order sync last touched the database.
+
+    `last_synced_at` is the MAX of `work_orders.last_synced_at` — the
+    UTC timestamp the sync upserter stamps onto every row it touches.
+    Null only on a freshly-migrated, empty database.
+    """
+
+    last_synced_at: datetime | None
+    work_order_count: int
+
+
+class WorkOrderSyncSummary(BaseModel):
+    """Result of POST /api/v1/work-orders/sync."""
+
+    fetched: int
+    upserted: int
+    notes_synced: int
+    errors: int
+
 
 router = APIRouter()
 
@@ -57,6 +80,16 @@ async def list_work_orders(
         datetime | None,
         Query(description="Only return WOs with sc_updated_date >= this ISO 8601 timestamp"),
     ] = None,
+    q: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Free-text search across WO number, SC purchase number, problem "
+                "code, caller, description, store id, location name, and client "
+                "name. Case-insensitive, substring match."
+            ),
+        ),
+    ] = None,
     page: Annotated[int, Query(ge=1, description="1-indexed page number")] = 1,
     page_size: Annotated[
         int,
@@ -81,9 +114,39 @@ async def list_work_orders(
     if updated_since is not None:
         filters.append(WorkOrder.sc_updated_date >= updated_since)
 
-    count_stmt = select(func.count()).select_from(WorkOrder)
-    if filters:
-        count_stmt = count_stmt.where(*filters)
+    # Free-text search. We OR across columns the operator is likely to
+    # type — WO number, SC purchase number, problem code, caller free
+    # text, description, and the joined Location/Client name fields.
+    # Outer joins so a WO with no client/location still matches on its
+    # own columns. Substring match via ILIKE — postgres handles case
+    # folding natively, no need to LOWER() both sides.
+    needs_search_joins = False
+    if q is not None and q.strip():
+        needle = f"%{q.strip()}%"
+        needs_search_joins = True
+        filters.append(
+            or_(
+                WorkOrder.sc_number.ilike(needle),
+                WorkOrder.sc_purchase_number.ilike(needle),
+                WorkOrder.problem_code.ilike(needle),
+                WorkOrder.caller.ilike(needle),
+                WorkOrder.description.ilike(needle),
+                Location.store_id.ilike(needle),
+                Location.name.ilike(needle),
+                Client.name.ilike(needle),
+                Client.short_name.ilike(needle),
+            )
+        )
+
+    def _apply_filters(stmt):
+        if needs_search_joins:
+            stmt = stmt.outerjoin(Location, WorkOrder.location_id == Location.id)
+            stmt = stmt.outerjoin(Client, WorkOrder.client_id == Client.id)
+        if filters:
+            stmt = stmt.where(*filters)
+        return stmt
+
+    count_stmt = _apply_filters(select(func.count(WorkOrder.id)).select_from(WorkOrder))
     total = (await db.execute(count_stmt)).scalar_one()
 
     stmt = (
@@ -97,8 +160,7 @@ async def list_work_orders(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    if filters:
-        stmt = stmt.where(*filters)
+    stmt = _apply_filters(stmt)
     rows = (await db.execute(stmt)).scalars().all()
 
     return WorkOrderListResponse(
@@ -106,6 +168,42 @@ async def list_work_orders(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/sync-status", response_model=WorkOrderSyncStatus)
+async def get_work_order_sync_status(
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderSyncStatus:
+    """Return when the WO sync last touched the local DB.
+
+    Cheap query (single MAX + COUNT), called by the WO list page header
+    to render "Last synced 12 minutes ago · 341 work orders".
+
+    NOTE: registered above the `/{work_order_id}` path-param route so
+    `/sync-status` doesn't get swallowed as a numeric id parse error.
+    """
+    last, count = (
+        await db.execute(select(func.max(WorkOrder.last_synced_at), func.count(WorkOrder.id)))
+    ).one()
+    return WorkOrderSyncStatus(last_synced_at=last, work_order_count=count)
+
+
+@router.post("/sync", response_model=WorkOrderSyncSummary)
+async def trigger_work_order_sync() -> WorkOrderSyncSummary:
+    """Trigger an immediate sync from SC. Runs inline (not via the
+    Procrastinate queue) so the operator sees the result in their
+    response. The scheduled hourly sync still runs in the background.
+
+    Idempotent. Calling repeatedly is fine — the upserter is keyed on
+    `sc_work_order_id` and counts each WO once per call.
+    """
+    summary = await sync_all_work_orders()
+    return WorkOrderSyncSummary(
+        fetched=summary["fetched"],
+        upserted=summary["upserted"],
+        notes_synced=summary["notes_synced"],
+        errors=len(summary["errors"]),
     )
 
 
@@ -182,9 +280,7 @@ async def update_work_order(
         new_vendor_id = update_data["assigned_vendor_id"]
         if new_vendor_id is not None:
             exists = (
-                await db.execute(
-                    select(Vendor.id).where(Vendor.id == new_vendor_id)
-                )
+                await db.execute(select(Vendor.id).where(Vendor.id == new_vendor_id))
             ).scalar_one_or_none()
             if exists is None:
                 raise HTTPException(

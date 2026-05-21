@@ -12,6 +12,8 @@ import type {
   WorkOrderListParams,
   WorkOrderListResponse,
   WorkOrderNoteRef,
+  WorkOrderSyncStatus,
+  WorkOrderSyncSummary,
 } from './types'
 
 export function listWorkOrders(
@@ -26,4 +28,14 @@ export function getWorkOrder(id: number): Promise<WorkOrderDetail> {
 
 export function listWorkOrderNotes(id: number): Promise<WorkOrderNoteRef[]> {
   return apiFetch<WorkOrderNoteRef[]>(`/api/v1/work-orders/${id}/notes`)
+}
+
+export function getWorkOrderSyncStatus(): Promise<WorkOrderSyncStatus> {
+  return apiFetch<WorkOrderSyncStatus>('/api/v1/work-orders/sync-status')
+}
+
+export function syncWorkOrdersFromSc(): Promise<WorkOrderSyncSummary> {
+  return apiFetch<WorkOrderSyncSummary>('/api/v1/work-orders/sync', {
+    method: 'POST',
+  })
 }

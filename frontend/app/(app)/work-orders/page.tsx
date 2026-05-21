@@ -3,7 +3,11 @@ import Link from 'next/link'
 import { Pagination } from '@/components/work-orders/Pagination'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { StatusFilter } from '@/components/work-orders/StatusFilter'
-import { listWorkOrders } from '@/lib/api/work-orders'
+import { SyncWorkOrdersButton } from '@/components/work-orders/SyncWorkOrdersButton'
+import {
+  getWorkOrderSyncStatus,
+  listWorkOrders,
+} from '@/lib/api/work-orders'
 import { money, relativeTime, shortDate } from '@/lib/format'
 
 const DEFAULT_PAGE_SIZE = 50
@@ -34,12 +38,19 @@ export default async function WorkOrdersPage({
   const page = parsePositiveInt(sp.page, 1)
   const page_size = parsePositiveInt(sp.page_size, DEFAULT_PAGE_SIZE)
   const status = stringParam(sp.status)
+  const q = stringParam(sp.q)
 
-  const data = await listWorkOrders({
-    page,
-    page_size,
-    ...(status ? { status } : {}),
-  })
+  // Fire list + sync-status in parallel; both are cheap and they're
+  // independent of each other.
+  const [data, syncStatus] = await Promise.all([
+    listWorkOrders({
+      page,
+      page_size,
+      ...(status ? { status } : {}),
+      ...(q ? { q } : {}),
+    }),
+    getWorkOrderSyncStatus(),
+  ])
 
   return (
     <div className="space-y-6">
@@ -50,16 +61,19 @@ export default async function WorkOrdersPage({
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {data.total.toLocaleString()} total
-            {status ? <> · filtered to <strong>{status}</strong></> : null} ·
+            {status ? <> · filtered to <strong>{status}</strong></> : null}
+            {q ? <> · matching <strong>“{q}”</strong></> : null} ·
             newest first
           </p>
         </div>
         <StatusFilter current={status} />
       </header>
 
+      <SyncWorkOrdersButton lastSyncedAt={syncStatus.last_synced_at} />
+
       <div className="overflow-hidden rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
         {data.items.length === 0 ? (
-          <EmptyState hasFilter={Boolean(status)} />
+          <EmptyState hasFilter={Boolean(status || q)} />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-white/10">
@@ -173,8 +187,8 @@ function EmptyState({ hasFilter }: { hasFilter: boolean }) {
     <div className="px-4 py-16 text-center">
       <p className="text-sm text-gray-500 dark:text-gray-400">
         {hasFilter
-          ? 'No work orders match the current filter.'
-          : 'No work orders in the database yet — run the sync worker.'}
+          ? 'No work orders match the current filter or search.'
+          : 'No work orders in the database yet — click Sync now or wait for the hourly sync.'}
       </p>
     </div>
   )
