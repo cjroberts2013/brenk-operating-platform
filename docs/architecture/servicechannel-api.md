@@ -261,6 +261,12 @@ permissions" (error code 504).** Same error class we hit on
 - The manual "Mark paid" button in our UI stays, for now. Auto-derive
   is blocked on scope.
 
+**Update 2026-05-25:** the response schema for `/v3/odata/invoices`
+was provided by Charles from SC's docs site. The endpoint is still
+gated by OAuth scope at runtime, but with the schema in hand we can
+build the auto-sync logic now and just point it at the endpoint once
+scope is granted. Schema and mapping captured in the next section.
+
 **`POST /invoices` — not attempted.** Sandbox data is real-shaped
 (per CLAUDE.md confidentiality note) and creating a test invoice
 would muddy CubeSmart's actual SC state. Holding until we either:
@@ -400,14 +406,72 @@ What we know we'll send for the minimum-viable Brenk submit:
      `sc_invoice_last_error` (string, last error message) so
      the UI can surface "Last submit failed: …"
 
+### GET /v3/odata/invoices — response schema + read-back mapping
+
+Response is an array of invoice objects. The fields we care about
+for read-back / auto-sync:
+
+| SC field | Type | Maps to our DB | Notes |
+|---|---|---|---|
+| `Id` | int | `work_orders.sc_invoice_id` | The SC-assigned invoice id. Stable identifier. |
+| `Number` | string | `work_orders.sc_invoice_number` | The InvoiceNumber we submitted. Round-trips. |
+| `WoTrackingNumber` | int | join to `work_orders.sc_work_order_id` | Links the invoice back to our WO. |
+| `Status` | string | derive `brenk_paid_at`, `sc_invoice_last_error` | Values observed in the docs example: `Open`, `Approved`, `Paid`, `Rejected`, others TBD when we sample real data. |
+| `PostedDate` | datetime | `work_orders.sc_invoice_submitted_at` (cross-check) | Useful to confirm our local timestamp matches SC's. |
+| `ApprovedDate` | datetime (nullable) | (no column yet — add if Daryl wants the distinction) | Set when client approves. |
+| `PaidDate` | datetime (nullable) | `work_orders.brenk_paid_at` (when `Status == Paid`) | **Replaces the manual Mark paid button** once auto-sync is live. |
+| `UpdatedDate` | datetime | tracking only | For incremental polling: `$filter=UpdatedDate gt {last_sync}`. |
+| `InvoiceTotal` | decimal | (no column — already derivable) | Sanity-check our computed total against SC's. |
+| `InvoiceBalance` | decimal | (no column) | Outstanding owed. Could feed a future "AR ageing" panel. |
+| `Payments[]` | array | (no column) | Itemized payment records (amount, date, paid by). Phase 4 analytics food. |
+| `Provider` | nested | (no column) | Brenk's provider record. Confirms what `VendorId` should be in our POST payload. |
+| `Subscriber` | nested | (no column) | CubeSmart's info. Mostly redundant with our `clients` table. |
+
+### Status → tab mapping (auto-sync)
+
+Once auto-sync is live, an invoice's `Status` field directly drives
+which tab the WO appears in on `/invoices`:
+
+| `Status` | Tab | Brenk-side effect |
+|---|---|---|
+| `Open` | Sent (just submitted) | Set `sc_invoice_submitted_at`. |
+| `Approved` | Sent (client approved, awaiting payment) | No-op; the WO stays in Sent. |
+| `Paid` | Paid | Set `brenk_paid_at = PaidDate`. |
+| `Rejected` | (back to Marked up?) | Set `sc_invoice_last_error = <reason>`. May need an explicit "Rejected" sub-state to avoid surprises. |
+| any | tracking | Always update `sc_invoice_id`, `sc_invoice_number`. |
+
+Open question for when we see real data: what `Status` strings does
+SC actually use? The schema example is just `"string"` — real values
+TBD on first successful read.
+
+### Auto-sync architecture
+
+When `/v3/odata/invoices` is reachable:
+
+1. New Procrastinate periodic task `sync_invoices` (hourly, like WOs).
+2. Query: `GET /v3/odata/invoices?$filter=UpdatedDate gt {max(work_orders.sc_invoice_updated_at)}` — incremental, only changed records.
+3. For each invoice, look up the WO by `WoTrackingNumber == sc_work_order_id` (or fall back to matching `Number == sc_invoice_number`).
+4. Update the WO's tracking columns + derive `brenk_paid_at` from `PaidDate` when `Status == "Paid"`.
+5. On `Status == "Rejected"`, surface the reason on the WO detail; UI gives a "Resubmit" button that reuses the same payload-builder.
+
+Once this is wired the manual "Mark paid" button can become a
+fallback only (for the rare case where Brenk records a payment
+outside SC).
+
 ### Implementation plan
 
 When the go signal lands:
 
+**Submit (POST) — six steps:**
+
 1. **Migration**: add `sc_invoice_number`, `sc_invoice_submitted_at`,
-   `sc_invoice_id`, `sc_invoice_last_error` columns to `work_orders`.
+   `sc_invoice_id`, `sc_invoice_status`, `sc_invoice_updated_at`,
+   `sc_invoice_last_error` columns to `work_orders`. (Status +
+   updated_at are added in this round so the read-back sync below
+   can write to them without a follow-up migration.)
 2. **SC client method**: `post_invoice(payload: dict) -> dict`
-   wrapping the POST + 4xx handling.
+   wrapping the POST + 4xx handling. Also `list_invoices_updated_since(
+   ts: datetime) -> list[dict]` wrapping the OData GET.
 3. **Payload builder**: pure function `build_invoice_payload(wo) ->
    dict` (testable without a DB or SC). Validates required fields
    (resolution non-empty, markup set, labor+material set, WO in
@@ -415,7 +479,9 @@ When the go signal lands:
 4. **New endpoint**: `POST /api/v1/work-orders/{id}/submit-invoice`.
    Body: empty (everything we need is on the WO already). Returns
    the updated WorkOrderDetail with the SC ID populated, or a 4xx
-   echoing SC's error.
+   echoing SC's error. Also writes `sc_invoice_submitted_at` and
+   `sc_invoice_status = "Open"` (provisional — will get the real
+   value on next read-back sync).
 5. **Frontend confirmation dialog**: Opened from a "Submit to
    ServiceChannel" button on the markup helper or on the
    "Marked up, ready to send" tab row. Shows the payload, the
@@ -426,9 +492,47 @@ When the go signal lands:
    `sc_invoice_number IS NOT NULL` already — guards against
    double-clicks and accidental re-submits.
 
+**Read-back (auto-sync) — three more steps:**
+
+7. **Sync service** `sync_invoices_from_sc()` in
+   `app/services/sync/invoices.py`. Mirrors the existing WO sync
+   shape. Pulls incremental via `UpdatedDate` filter, joins each
+   SC invoice to a local WO by `WoTrackingNumber`, updates the
+   tracking columns + the derived `brenk_paid_at`.
+8. **Periodic schedule**: hourly via Procrastinate, same as WO sync.
+   Manual trigger endpoint `POST /api/v1/invoices/sync` for the
+   debug/dev workflow.
+9. **UI tweaks**:
+   - Vendor-side rejected handling: WO appears in "Marked up" tab
+     again with a red "Rejected: <reason>" badge and a "Resubmit"
+     button. The Resubmit button re-runs the payload builder
+     (which picks up any edits Daryl made since the rejection)
+     and POSTs again, this time clearing `sc_invoice_last_error`.
+   - Sent-tab subtitle gains an "Approved" sub-state visualization
+     once SC bumps Status: `Sent · Approved (awaiting payment)`.
+   - The manual "Mark paid" button stays as a fallback but now
+     reads as "Mark paid manually (skip waiting for SC sync)" so
+     Daryl knows the normal flow is automatic.
+
 After Phase 1.5 ships, the "Marked up, ready to send" tab becomes
-genuinely actionable — one click, gone. The manual SC-entry step
-disappears.
+genuinely actionable — one click, gone — and the "Paid" transition
+becomes automatic via the read-back sync. The manual SC-entry step
+disappears entirely; the manual Mark paid button becomes the
+exception path rather than the default.
+
+### Current blockers — 2026-05-25
+
+- ✅ POST /v3/invoices request schema — captured.
+- ✅ GET /v3/odata/invoices response schema — captured.
+- ❌ Actual access to `/v3/odata/invoices` (401 today). Need
+  expanded OAuth scope from SC support.
+- ❌ Confirmation that our current OAuth grant permits writes
+  (`POST /v3/invoices`). Untested.
+
+Both runtime blockers can be cleared with a single ticket to SC
+support. We can implement everything above now and just gate the
+actual HTTP calls behind a feature flag (or run dry-run, logging
+the payload that would have been sent) until access is confirmed.
 
 ### Interim alternative (if SC support is slow)
 
