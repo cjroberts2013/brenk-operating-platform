@@ -273,14 +273,162 @@ would muddy CubeSmart's actual SC state. Holding until we either:
 
 To finish the Phase 1.5 spike we need ONE of:
 
-- The full request schema for `POST /v3/invoices` (so we can build
-  the payload without trial POSTs against shared sandbox data), OR
+- ~~The full request schema for `POST /v3/invoices`~~ — **OBTAINED
+  2026-05-25 from Charles via SC's docs site. Schema captured
+  below.**
 - Expanded OAuth scope that unlocks `/v3/odata/invoices` — letting
   us GET a sample existing invoice to mirror the shape, AND
   letting us auto-sync invoice state for the Sent → Paid pipeline.
 
-Both are worth asking SC support for in the same email — the first
-unblocks submit, the second unblocks auto-derive-paid.
+The second is still worth asking SC support for — it unblocks
+auto-derive-paid (which would replace the manual Mark paid button)
+without needing to wait for client-side state to be visible.
+
+### POST /v3/invoices — request schema
+
+Full schema (2026-05-25, from SC docs):
+
+```jsonc
+{
+  "InvoiceNumber": "string",            // REQUIRED. Operator-created.
+  "InvoiceDate": "2026-05-25T17:51:28Z",
+  "InvoiceDateDTO": "2026-05-25T17:51:28Z",
+  "WoIdentifier": "string",             // REQUIRED. WO# (sc_number).
+  "InvoiceTax": 0,
+  "PostedTaxRate": 0,
+  "NonTaxableLabor": 0,
+  "NonTaxableTravel": 0,
+  "NonTaxableMaterial": 0,
+  "NonTaxableFreight": 0,
+  "NonTaxableOther": 0,
+  "WithMismatchedRates": false,
+  "InvoiceTotal": 0,
+  "InvoiceText": "string",              // CubeSmart-required (resolution).
+  "InvoiceAmountsDetails": {
+    "LaborAmount": 0,
+    "MaterialAmount": 0,
+    "TravelAmount": 0,
+    "FreightAmount": 0,
+    "OtherAmount": 0,
+    "OtherDescription": "string"
+  },
+  "InvoiceTaxesDetails": { /* per-category tax % + amount */ },
+  "Tax2Details": { "Tax2Amount": 0, "Tax2Name": "string" },
+  "TaxIncluded": { /* per-category EU VAT flag strings */ },
+  "Labors":    [ /* optional line items */ ],
+  "Materials": [ /* optional, has per-material MarkUpPercent */ ],
+  "Travels":   [ /* optional */ ],
+  "Others":    [ /* optional */ ],
+  "ExplainDispute": "string",
+  "SubmitDisputed": false,
+  "VendorId": 0,
+  "Terms": "string",
+  "Attachments": [ /* optional */ ]
+}
+```
+
+**Note** (from SC docs): the WO must be in `Completed` status for the
+POST to succeed. This matches our pipeline — only WOs in our
+`ready_to_invoice` stage map to that state, and that's exactly what
+the "Marked up, ready to send" tab filters to.
+
+### Our data → SC payload mapping
+
+What we know we'll send for the minimum-viable Brenk submit:
+
+| SC field | Source | Notes |
+|---|---|---|
+| `InvoiceNumber` | Generated. **TBD** below. | Daryl might already have a numbering scheme in SC. |
+| `WoIdentifier` | `work_orders.sc_number` | TrackingNumber/WorkOrderNumber per docs. |
+| `InvoiceDate` / `InvoiceDateDTO` | `now()` UTC | Must be within CubeSmart's 1-day posting window per `InvoiceRequirements`. |
+| `InvoiceText` | `work_orders.resolution` | **Required by CubeSmart**. If empty we should error before submit. |
+| `InvoiceTotal` | `(labor + material) × (1 + markup/100)` | Matches what the markup helper shows today. |
+| `InvoiceAmountsDetails.LaborAmount` | `brenk_labor_cost × (1 + markup/100)` | Post-markup billable amount. |
+| `InvoiceAmountsDetails.MaterialAmount` | `brenk_material_cost × (1 + markup/100)` | Same. |
+| `InvoiceAmountsDetails.TravelAmount` | `0` | Brenk doesn't track travel as a separate cost today. |
+| `InvoiceAmountsDetails.FreightAmount` | `0` | Same. |
+| `InvoiceAmountsDetails.OtherAmount` | `0` | Same. |
+| All `Tax*` fields | `0` | Brenk's WOs in dev are US, no VAT, no posted tax rates. Revisit per-subscriber if CubeSmart actually wants tax detail. |
+| `Labors`, `Materials`, `Travels`, `Others` | empty arrays / omitted | Per the docs, optional. The amounts in `InvoiceAmountsDetails` are sufficient unless SC's UI needs the breakdown for audit. |
+| `VendorId` | TBD — likely Brenk's provider ID in SC | Different from `assigned_vendor_id` (which is Brenk's sub-vendor). |
+| `Terms` | `""` | Skip in v1. |
+| `Attachments` | `[]` | Skip in v1. Could ferry vendor receipts later. |
+
+### Open decisions for the implementation
+
+1. **InvoiceNumber format** — Daryl likely has an existing scheme he
+   uses in SC. Likely candidates:
+   - `BRENK-{wo.sc_number}` — readable, unique per WO. *(default if Daryl has no preference)*
+   - `BRENK-{wo.sc_number}-{yyyymmdd}` — if he re-invoices the same WO. Probably overkill.
+   - Sequential `BRENK-00001` — needs a counter. Not worth the complexity.
+   Will ask Daryl which one he wants.
+
+2. **Auto-submit vs confirmation dialog.** Default: **confirmation
+   dialog**. The "Submit to ServiceChannel" button on the WO detail
+   (or in the "Marked up, ready to send" row) opens a dialog showing
+   the exact JSON we'll send, with a final Submit button. Preserves
+   Daryl's review beat. Once he's used it 50 times we can add a
+   "skip dialog" preference, but defaulting safe is the right call.
+
+3. **Line items (`Labors`/`Materials`) vs aggregated amounts only.**
+   Default: **aggregated amounts only**. We don't capture the
+   structured data (hours × rate, part numbers, etc.) that would
+   make line items meaningful. SC docs explicitly allow omitting
+   them when amounts are sufficient. Revisit if CubeSmart starts
+   rejecting amount-only submissions.
+
+4. **Tax handling.** Default: **zero everywhere**. Brenk's sandbox
+   data shows no posted tax rates. If CubeSmart wants tax broken
+   out we'll see it in rejection reasons or discrepancy responses
+   and add it then.
+
+5. **`VendorId` field.** Open — needs probing. Likely Brenk's own
+   `ProviderId` in CubeSmart's subscriber context, not the
+   `assigned_vendor_id` we track on the WO (which is the
+   *sub-vendor* Brenk dispatched). Will probe a known existing
+   invoice via discrepancy endpoint (which doesn't need OData
+   scope) to confirm.
+
+6. **What we record after submit.**
+   - New WO column `sc_invoice_number` — the InvoiceNumber we sent.
+   - New WO column `sc_invoice_submitted_at` — UTC timestamp of
+     the successful POST.
+   - New WO column `sc_invoice_id` — the ID SC returned, if it
+     returns one. (Schema doesn't show a response body; need to
+     POST once to find out.)
+   - On 4xx from SC, record the rejection reason in a new column
+     `sc_invoice_last_error` (string, last error message) so
+     the UI can surface "Last submit failed: …"
+
+### Implementation plan
+
+When the go signal lands:
+
+1. **Migration**: add `sc_invoice_number`, `sc_invoice_submitted_at`,
+   `sc_invoice_id`, `sc_invoice_last_error` columns to `work_orders`.
+2. **SC client method**: `post_invoice(payload: dict) -> dict`
+   wrapping the POST + 4xx handling.
+3. **Payload builder**: pure function `build_invoice_payload(wo) ->
+   dict` (testable without a DB or SC). Validates required fields
+   (resolution non-empty, markup set, labor+material set, WO in
+   COMPLETED status) and raises a clear error otherwise.
+4. **New endpoint**: `POST /api/v1/work-orders/{id}/submit-invoice`.
+   Body: empty (everything we need is on the WO already). Returns
+   the updated WorkOrderDetail with the SC ID populated, or a 4xx
+   echoing SC's error.
+5. **Frontend confirmation dialog**: Opened from a "Submit to
+   ServiceChannel" button on the markup helper or on the
+   "Marked up, ready to send" tab row. Shows the payload, the
+   billable breakdown, the resolution text, and a primary Submit
+   button. On success, the WO moves to the "Sent" tab on next
+   navigation; on failure, surfaces SC's reason.
+6. **Idempotency**: the submit endpoint refuses to post if
+   `sc_invoice_number IS NOT NULL` already — guards against
+   double-clicks and accidental re-submits.
+
+After Phase 1.5 ships, the "Marked up, ready to send" tab becomes
+genuinely actionable — one click, gone. The manual SC-entry step
+disappears.
 
 ### Interim alternative (if SC support is slow)
 
