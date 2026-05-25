@@ -222,6 +222,73 @@ endpoints above; we don't ever call them ourselves.
 5. **Design the UX:** confirm dialog before POST, error surfacing on
    failure, idempotency guard (`sc_invoiced_at IS NOT NULL` skip).
 
+### Spike results — 2026-05-25
+
+Probed three of the five endpoints listed above. Findings:
+
+**`GET /v3/invoices/{subscriberId}/InvoiceRequirements`** ✓
+Returned a full config object for CubeSmart (subscriber `2014917186`).
+Highlights for the submit payload:
+
+| Field | Value | Implication for our POST |
+|---|---|---|
+| `RequireResolutionText` | **true** | Daryl must fill in the WO's Resolution before we can submit. We already capture this from SC (`work_orders.resolution`); UI needs to warn if empty. |
+| `RequireApprovalText` | false | Skip. |
+| `DaysBeforePostingDate` | 1 | 1-day window before posting date is allowed. |
+| `MaxDaysAfterPostingDate` | 1 | 1-day window after posting date. Operationally tight — submit fast. |
+| `IsInvoiceNumberValidationFeatureEnabled` | true | SC validates the invoice number format. Need to learn the rule (probe a real invoice, or ask SC support). |
+| `IsInvoiceNegativeFeatureEnabled` | false | Negative-amount invoices rejected. Our markup helper enforces positives. |
+| `IsInvoiceZeroVATEU` | false | Not EU; ignore. |
+| `AvailableTrades` | JSON array | The list of valid `Trade.Id` values CubeSmart accepts on an invoice. Mostly overlaps with our `trades.sc_trade_id` mirror. |
+
+**`GET /v3/invoices/{subscriberId}/InvoiceRejectionReasons`** ✓
+Three generic rejection codes: "Work order not invoiceable" (1),
+"Invoice requires correction" (2), "Other" (3). Useful for the
+failed-submit UI but no surprises.
+
+**`GET /v3/invoices/statistics`** ✓
+`{DaysPeriod: 30, WoReadyForInvoices: 16, OpenInvoices: 0,
+ApprovedInvoicesDaysPeriod: 3, ApprovedInvoices: 2}` — matches our
+dashboard's "Ready to invoice" count (within a recency window).
+Could feed a small "SC pipeline health" widget later.
+
+**`GET /v3/odata/invoices`** ✗ **401 "API call rejected by security
+permissions" (error code 504).** Same error class we hit on
+`/v3/users` (forced us to OData users). Implications:
+- We cannot enumerate existing invoices to sample the response shape.
+- We cannot poll for invoice state changes (Sent → Approved → Paid)
+  without an expanded scope.
+- The manual "Mark paid" button in our UI stays, for now. Auto-derive
+  is blocked on scope.
+
+**`POST /invoices` — not attempted.** Sandbox data is real-shaped
+(per CLAUDE.md confidentiality note) and creating a test invoice
+would muddy CubeSmart's actual SC state. Holding until we either:
+
+1. Find an SC test-WO Daryl agrees to use as a guinea pig, or
+2. Get the documented JSON schema for the POST body from SC support
+   without trial-and-error.
+
+### Blocked on SC support engagement
+
+To finish the Phase 1.5 spike we need ONE of:
+
+- The full request schema for `POST /v3/invoices` (so we can build
+  the payload without trial POSTs against shared sandbox data), OR
+- Expanded OAuth scope that unlocks `/v3/odata/invoices` — letting
+  us GET a sample existing invoice to mirror the shape, AND
+  letting us auto-sync invoice state for the Sent → Paid pipeline.
+
+Both are worth asking SC support for in the same email — the first
+unblocks submit, the second unblocks auto-derive-paid.
+
+### Interim alternative (if SC support is slow)
+
+Daryl already opens SC manually via the "Open in ServiceChannel"
+button on the WO detail page. The markup helper shows him the exact
+total to type into SC's own invoice form. That manual hop is the
+de-facto Phase 1 state; Phase 1.5 just removes the typing step.
+
 ---
 
 ## Research: Employee → assigned WOs mapping (2026-05-21)
