@@ -524,15 +524,55 @@ exception path rather than the default.
 
 - ✅ POST /v3/invoices request schema — captured.
 - ✅ GET /v3/odata/invoices response schema — captured.
-- ❌ Actual access to `/v3/odata/invoices` (401 today). Need
-  expanded OAuth scope from SC support.
+- ❌ Actual access to `/v3/odata/invoices` (401 today).
 - ❌ Confirmation that our current OAuth grant permits writes
   (`POST /v3/invoices`). Untested.
 
-Both runtime blockers can be cleared with a single ticket to SC
-support. We can implement everything above now and just gate the
-actual HTTP calls behind a feature flag (or run dry-run, logging
-the payload that would have been sent) until access is confirmed.
+**Important reframing (2026-05-25 from the SC auth docs at
+<https://developer.servicechannel.com/basics/general/authentication/>):**
+
+SC's OAuth implementation **does not use scopes**. The docs are
+explicit: two grant types (authorization code + resource-owner
+password credentials), no scope concept. Permissions are entirely
+tied to **the user account whose credentials are in the password
+grant** — not to token-level scopes that we could request.
+
+That means our 401 on `/v3/odata/invoices` is **not a scope problem
+we ask SC to grant**. It's a **role / permission problem on the
+specific SC user account** whose username + password live in
+`backend/.env`'s `SC_USERNAME` / `SC_PASSWORD`. Same user can read
+work orders, users, notes, invoice subscriber requirements,
+statistics — but cannot read the invoice OData entity-set or POST
+invoices, because their SC role doesn't grant those rights.
+
+**Path to unblock — likely no SC support ticket needed:**
+
+1. **Identify which SC user account we're using.** Check
+   `backend/.env`'s `SC_USERNAME` — that's the account whose role
+   we need to expand.
+2. **Have Brenk's SC admin grant that user the relevant SC roles.**
+   The exact role names aren't in the public docs; the SC admin UI
+   should list available roles. Likely candidates: any role
+   carrying "Invoice — Read", "Invoice — Create", or similar
+   invoice-management permissions.
+3. **Verify by re-probing** — a single curl against
+   `/v3/odata/invoices?$top=1` confirms the change took.
+
+Once that's done, we can also retry `POST /v3/invoices` with a
+real test WO (with Daryl's go-ahead) to confirm writes work end-
+to-end.
+
+**If self-service permission-grant doesn't unblock it** (e.g., the
+necessary role doesn't exist at the user level in CubeSmart's
+subscriber config), then an SC support ticket becomes the fallback.
+But the auth docs strongly suggest this is configurable inside
+SC's own role/user management, not something SC support has to
+flip on their side.
+
+We can still implement everything above now and gate the actual
+HTTP calls behind a feature flag (`SC_INVOICE_WRITES_ENABLED=false`)
+or run dry-run, logging the payloads we would have sent, until
+the user-role expansion is confirmed.
 
 ### Interim alternative (if SC support is slow)
 
