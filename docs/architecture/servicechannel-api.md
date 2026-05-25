@@ -492,6 +492,140 @@ We can still implement the receiver endpoint + handlers in dev
 without real webhook deliveries — unit-test against fixtures
 that mirror SC's payload shape.
 
+### Webhooks — full spec (2026-05-25)
+
+Sourced from <https://developer.servicechannel.com/guides/wh/>.
+This is the canonical reference for the read-back side of Phase 1.5.
+
+#### Event delivery
+
+- **Method:** `POST` to the configured URL.
+- **Body shape:**
+  ```json
+  {
+    "Object": { /* full object — invoice, WO, etc. */ },
+    "EventType": "InvoicePaid"
+  }
+  ```
+  Full object included; no follow-up GET needed.
+- **Headers:**
+  - `Content-Type: application/json; charset=utf-8`
+  - `Content-Length: <size>`
+  - `Sign-Type: HMACSHA256`
+  - `Sign-Data: <base64-encoded HMAC-SHA256 of body, using signing key>`
+- **Required response:** any 2xx within **5 seconds**.
+- **Retry:** non-2xx or timeout triggers 3 retries with **5-minute
+  delay** between attempts. Total window ~15 min, then event is
+  dropped.
+- **Circuit-breaker:** after 1000 consecutive failures the webhook
+  is paused for 12 hours; further failures permanently disable it.
+
+#### Signature verification
+
+1. Once, after creating the webhook, fetch the signing key:
+   `GET /v3/NotificationSubscriptions/SigningKey` (unique per
+   subscriber/provider). Stash in `.env` as `SC_WEBHOOK_SIGNING_KEY`.
+2. On each inbound POST, compute
+   `base64(HMAC-SHA256(raw_body, SC_WEBHOOK_SIGNING_KEY))`.
+3. Constant-time compare to the `Sign-Data` header. Reject mismatch
+   with 401.
+
+#### Configuration model
+
+| Concept | What it is |
+|---|---|
+| **Webhook** | The container. Holds the URL + name + enabled flag + 1-20 subscriptions. |
+| **Subscription** | A filter inside a webhook. Each subscription targets one object type and a list of event types. Optional `Rules` filter on `Trades` and `Categories`. |
+
+Limits: 20 webhooks per provider, 20 subscriptions per webhook,
+400 subscriptions total. We need ~1 webhook with 1-2 subscriptions
+for v1 — comfortably under the cap.
+
+Created via `POST /v3/NotificationWebHooks` or via the SC web UI's
+**Integration → WebHooks** page. UI is simpler for a one-time
+setup; API is for self-service / programmatic re-config.
+
+Example registration body:
+```json
+{
+  "Name": "Brenk Operating Platform",
+  "Description": "Production invoice + WO state sync",
+  "Url": "https://app.brenkfacilityservices.com/api/v1/webhooks/sc",
+  "Enabled": true,
+  "Subscriptions": [
+    {
+      "Name": "Invoices",
+      "EventTypes": [
+        "InvoiceCreated", "InvoiceApproved", "InvoicePaid",
+        "InvoiceOnHold", "InvoiceRejected", "InvoiceVoided"
+      ],
+      "Rules": {}
+    }
+  ]
+}
+```
+
+#### Event catalog — what we'd subscribe to (v1)
+
+**Invoice events (auto-sync for Phase 1.5 read-back):**
+
+| Event | Effect on our DB |
+|---|---|
+| `InvoiceCreated` | Confirm submission landed. Update `sc_invoice_id` + status. |
+| `InvoiceOpen` | Provisional submitted state. |
+| `InvoiceApproved` | Client approved. Move WO to "Sent · Approved (awaiting payment)" visual. |
+| `InvoiceOnHold` | Client paused review. Surface to operator. |
+| `InvoiceRejected` | Failed. Set `sc_invoice_last_error`, bounce WO back to "Marked up" with Resubmit button. |
+| `InvoicePaid` | **The big one.** Set `brenk_paid_at = PaidDate`. WO moves to Paid tab automatically. |
+| `InvoiceVoided` | Provider-side void. Surface to operator. |
+
+Events we'd skip in v1: `InvoiceReviewed`, `InvoiceApprovalCodeChanged`,
+`InvoiceDisputed`, `InvoiceStarAdded`, `InvoiceStarRemoved` —
+either too specific to multi-level workflows or pure UI annotations.
+
+**Work-order events (deferred — replaces our hourly poll later):**
+
+Webhooks could eventually replace our hourly `sync_work_orders`
+polling. Useful events when we get there: `WorkOrderCreated`,
+`WorkOrderStatusChanged`, `WorkOrderNoteAdded`,
+`WorkOrderScheduledDateChanged`, `WorkOrderNteChanged`,
+`WorkOrderResolutionCreated`, `WorkOrderResolutionUpdated`.
+The resolution events matter for our submit-readiness check
+(invoice requires Resolution text). Out of v1 scope; logged for
+later.
+
+#### Permission to register webhooks
+
+The docs specify:
+- **Subscribers** need *"Super Admin"* secondary role.
+- **Providers** (Brenk's side) need *"Provider Automation Admin"*
+  access level.
+
+If Daryl's user account (`brenkconstruction@gmail.com`) doesn't
+have **Provider Automation Admin**, the registration POST itself
+will 401/403. Worth checking the Brenk admin UI for roles before
+trying to register. This is **likely the same root cause** as the
+401 on `/v3/odata/invoices` — both are gated by similar role-
+based permissioning on the user account, not subscriber consent.
+
+#### Practical sequencing
+
+Webhooks need a **public HTTPS URL**. Receiver can be built and
+unit-tested in dev against payload fixtures, but live registration
+needs a stable public URL. That makes Phase 1.5 webhook work pair
+naturally with the production cutover:
+
+1. **Dev (no waiting):** build the receiver endpoint, signature
+   verification, per-event handlers. Tested against fixtures.
+2. **Production cutover:** deploy backend to Fly.io → get the
+   public URL.
+3. **Live setup:** UI registers the webhook with the prod URL,
+   fetch signing key, paste into prod `.env`.
+4. **Test:** submit one real invoice (via prod's `POST /v3/invoices`
+   path or by Daryl using SC's UI), confirm we receive
+   `InvoiceCreated` → eventually `InvoiceApproved` → `InvoicePaid`,
+   confirm WO state in our app updates.
+
 ### Once-and-for-all: known IDs from the SC web UI
 
 - Brenk's ProviderId: **`2000091087`** (shown in the footer of
