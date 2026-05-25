@@ -4,6 +4,40 @@ import { EnvelopeIcon, MapPinIcon, PhoneIcon } from '@heroicons/react/24/outline
 import { ServiceIcon } from '@/components/marketing/ServiceIcon'
 import { getStorefrontPublic } from '@/lib/api/storefront'
 
+/** Validate an operator-supplied href before rendering.
+ *
+ *  Allow:
+ *   - empty / null (caller falls back to a safe default)
+ *   - anchors (#contact)
+ *   - http: / https: (absolute)
+ *   - mailto: / tel:
+ *   - relative paths that START WITH / (e.g. '/services') so the
+ *     anchor stays on the bare domain
+ *
+ *  Block everything else — most importantly `javascript:`,
+ *  `data:`, vbscript:, etc. — which would otherwise be a stored-
+ *  XSS vector if a malicious editor user planted one.
+ *
+ *  Defense in depth — the editor has authenticated access only,
+ *  but trusting operator input on render means we don't have to
+ *  audit every code path that writes the field. */
+function safeHref(raw: string | null, fallback = '#contact'): string {
+  if (!raw) return fallback
+  const trimmed = raw.trim()
+  if (!trimmed) return fallback
+  if (trimmed.startsWith('#')) return trimmed
+  if (trimmed.startsWith('/')) return trimmed
+  // Anything with a colon needs a scheme allowlist.
+  if (trimmed.includes(':')) {
+    const lower = trimmed.toLowerCase()
+    const allowed = ['http://', 'https://', 'mailto:', 'tel:']
+    if (!allowed.some((p) => lower.startsWith(p))) {
+      return fallback
+    }
+  }
+  return trimmed
+}
+
 export default async function StorefrontPage() {
   const content = await getStorefrontPublic()
 
@@ -126,7 +160,7 @@ function Hero({
           {ctaText ? (
             <div className="mt-8">
               <a
-                href={ctaLink ?? '#contact'}
+                href={safeHref(ctaLink, '#contact')}
                 className="inline-flex items-center rounded-md bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-600"
               >
                 {ctaText}

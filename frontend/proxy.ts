@@ -21,6 +21,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 /** Paths that anyone can hit without a Supabase session. */
 const PUBLIC_PATH_PREFIXES = ['/login', '/auth', '/marketing']
 
+/** Exact paths (not prefixes) that anyone can hit. Crawler files
+ *  belong at canonical paths on every host. */
+const PUBLIC_PATHS = new Set(['/robots.txt', '/sitemap.xml', '/favicon.ico'])
+
 /** True when the request host should serve the public marketing
  *  storefront instead of the dashboard. The dashboard lives at
  *  `app.<domain>`; everything else (bare apex, www, etc.) is the
@@ -42,13 +46,21 @@ export async function proxy(request: NextRequest) {
   const host = request.headers.get('host') ?? ''
 
   // 1. Bare-domain rewrite. If we're on a storefront host and the
-  //    path doesn't already start with /marketing, /api, or /_next,
-  //    rewrite it under /marketing so Next serves the public pages.
+  //    path doesn't already start with /marketing, /api, /_next,
+  //    or one of the well-known crawler/static files, rewrite it
+  //    under /marketing so Next serves the public pages.
+  //
+  //    Crawler files (robots.txt, sitemap.xml, favicon.ico) MUST be
+  //    served at their canonical paths — search engines look there
+  //    by convention and a rewrite would 404 the lookups.
   if (
     isStorefrontHost(host) &&
     !path.startsWith('/marketing') &&
     !path.startsWith('/api') &&
-    !path.startsWith('/_next')
+    !path.startsWith('/_next') &&
+    path !== '/robots.txt' &&
+    path !== '/sitemap.xml' &&
+    path !== '/favicon.ico'
   ) {
     const rewriteUrl = request.nextUrl.clone()
     rewriteUrl.pathname = `/marketing${path === '/' ? '' : path}`
@@ -84,9 +96,11 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const isPublic = PUBLIC_PATH_PREFIXES.some(
-    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
-  )
+  const isPublic =
+    PUBLIC_PATHS.has(path) ||
+    PUBLIC_PATH_PREFIXES.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    )
 
   if (!user && !isPublic) {
     const loginUrl = request.nextUrl.clone()

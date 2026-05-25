@@ -670,6 +670,58 @@ Once Daryl has used this on, say, a dozen real invoices, ask:
   match SC's exact shades, or use cleaner Tailwind colors that map to
   the same conceptual stage?
 
+## Storefront / Dashboard Boundary
+
+The same Next.js project serves **two distinct surfaces** on two
+hosts; `proxy.ts` enforces the split before any page renders.
+
+| Host | What renders | Auth required? |
+|---|---|---|
+| `brenkfacilityservices.com` (apex) | Public storefront — `/marketing/*` route group | No |
+| `www.brenkfacilityservices.com` | Same as apex (same `isStorefrontHost` rule) | No |
+| `app.brenkfacilityservices.com` | Dashboard — everything in `(app)` route group | Yes (Supabase JWT) |
+| `localhost` / `127.0.0.1` | Dashboard. Preview the storefront at `/marketing` directly. | Yes |
+
+**How the isolation actually works:**
+
+1. **Bare-domain rewrite** (`proxy.ts`): if the incoming `Host`
+   header doesn't start with `app.` (and isn't `localhost`), every
+   path except `/marketing/*`, `/api/*`, `/_next/*`, `/robots.txt`,
+   `/sitemap.xml`, and `/favicon.ico` gets rewritten under
+   `/marketing<path>`. So `brenkfacilityservices.com/work-orders`
+   resolves internally to `/marketing/work-orders`, which doesn't
+   exist as a route → clean 404.
+2. **Dashboard auth gate** (`proxy.ts`): on the `app.*` host, every
+   path except `/login`, `/auth/*`, and the public crawler files
+   redirects to `/login?next=…` when there's no Supabase session.
+3. **Cookie scoping**: Supabase session cookies are set on
+   `app.brenkfacilityservices.com` — they don't propagate up to
+   the bare domain, so a dashboard user visiting the storefront
+   doesn't accidentally leak their session there.
+4. **No dashboard links in storefront markup**: every `<a>` in
+   `app/marketing/page.tsx` is either an anchor (`#section`), `/`
+   (root of the storefront), `tel:` / `mailto:`, or runs through
+   the `safeHref()` allowlist that strips `javascript:`, `data:`,
+   etc.
+
+**robots.txt** (`app/robots.txt/route.ts`) is host-aware:
+- Bare domain: `Allow: /` (storefront is meant to be indexed)
+- App subdomain: `Disallow: /` (block crawlers from the dashboard)
+- `Vary: Host` so edge caches keep separate copies.
+
+**Test cases that pass today** (run via `curl -H "Host: …"`):
+- `brenkfacilityservices.com/` → 200 storefront ✓
+- `brenkfacilityservices.com/work-orders` → 404 (not a dashboard
+  page, just an unknown marketing path)
+- `brenkfacilityservices.com/storefront` → 404 (editor not
+  reachable from bare domain)
+- `brenkfacilityservices.com/login` → 404 (no sign-in form on
+  bare domain)
+- `app.brenkfacilityservices.com/` (no session) → 307 → `/login`
+- `app.brenkfacilityservices.com/login` → 200 sign-in form
+
+If you change `proxy.ts` rewrites or auth-gates, re-run these.
+
 ## Supabase Environment Strategy
 
 Currently a **single Supabase project** is used for development. At end of
