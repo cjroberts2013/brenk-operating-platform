@@ -500,6 +500,70 @@ that mirror SC's payload shape.
 - CubeSmart's SubscriberId: **`2014917186`** (from our `clients`
   table).
 
+### SC integration team contact
+
+For any of these self-service permission questions that aren't
+covered by an existing admin UI:
+
+**`scintegration@servicechannel.com`**
+
+Source: the Contractor Request Form's instructions explicitly
+route signed forms here. More targeted than generic SC support
+— this is the team that handles integration setup directly.
+
+### Three-track unblocker picture (2026-05-25)
+
+Phase 1.5 has three distinct permission tracks, with separate
+resolution paths. None of them is "wait on SC support" in the
+generic sense — each has a specific channel.
+
+| Track | What it unlocks | Mechanism | Channel |
+|---|---|---|---|
+| **WO-status writes** | Mark WOs complete in SC from our app, post notes back, update schedule dates | Contractor Request Form | Sign + countersign with CubeSmart, email to `scintegration@servicechannel.com` |
+| **Invoice POST** | One-click invoice submission from our app | Unknown — **not on the Contractor Request Form** | Separate inquiry to `scintegration@servicechannel.com` |
+| **Invoice read-back** | Auto-derive Sent → Approved → Paid (replaces manual "Mark paid") | **Webhooks** (preferred); OData polling is fallback | Configure on Integration → WebHooks page; needs event-type discovery first |
+
+### What the Contractor Request Form covers (2026-05-25)
+
+A PDF, signed by both Brenk and CubeSmart, sent to
+`scintegration@servicechannel.com`. Seven yes/no toggles:
+
+1. Allow complete WO directly to billable (`Completed` or
+   `Completed - Confirmed`). *Form notes: "Typically Clients
+   check No here." Fine — Daryl goes through SC's invoice flow
+   so this is moot for our use case.*
+2. Allow complete WO to non-billable (`Pending Confirmation`).
+   **Useful** — would let our app mark a WO done in SC.
+3. Allow update WO to other non-billable statuses (On Site,
+   Parts on Order, etc.). **Useful** for keeping SC in sync
+   with our pipeline-stage flags.
+4. Allow transfer of internal check in/out in lieu of IVR.
+   *Optional* — only if CubeSmart doesn't require store-phone
+   caller ID.
+5. Allow post notes & scheduled date changes from our app.
+   **Useful** — note write-back.
+6. Allow creating Work Orders via the API. *Rare in Brenk's
+   flow*; nice-to-have.
+7. Allow setting non-zero NTE on contractor-created WOs. *Only
+   matters if #6 is Yes.*
+
+**No line item for invoice creation.** That's a separate ask.
+
+Fields on the form Brenk would fill in:
+
+- Contractor / Representative Name: Daryl Brenk (or Brenk
+  Facility Services, LLC)
+- Provider ID(s): **`2000091087`**
+- Client: CubeSmart
+- Subscriber ID(s): **`2014917186`**
+- Requested-by-Contractor column: check Yes on #2, #3, #5 at
+  minimum; everything else per discussion with Daryl.
+
+This form is worth getting signed now regardless of when we
+build Phase 1.5 — once the WO-status writes are enabled, our
+pipeline-stage flags can flow back into SC over time, which
+keeps SC's view in sync with what Daryl is doing in our app.
+
 ### Implementation plan
 
 When the go signal lands:
