@@ -147,3 +147,51 @@ Our client respects `Retry-After` automatically.
 - Where attachment files actually live (pre-signed URLs vs. file IDs)
 - How sub-vendors are represented (or whether they're not at all)
 - Webhooks: ServiceChannel offers them — could replace polling for some events
+
+## Research: Employee → assigned WOs mapping (2026-05-21)
+
+Daryl noted that in the SC web UI he can view an employee and see every
+work order assigned to that employee. We want this mapping in our
+dashboard — on the vendor detail page, alongside our own Brenk-native
+assignment, as a cross-reference ("did I tell this person about all the
+WOs SC thinks they're on?").
+
+**Current state of our knowledge** (from the May 19 probe):
+
+- The per-WO `Assignee` field returned by `/v3/workorders/{id}` is
+  **empty across all 341 sandbox WOs**. That's why we previously
+  concluded the data wasn't reachable — but it's almost certainly a
+  sandbox-only condition, since the web UI clearly reads it from
+  somewhere.
+- `/v3/odata/users` (which we use for vendor identity sync) returns
+  the user list but no assignment relation. The `/v3/users` non-OData
+  variant returns `401` with error code 504 — security-permission
+  rejection, not a missing endpoint.
+- `/v3/odata/employees` exists as a sibling. We have not yet probed
+  it for nested assignment data.
+
+**Next probes to run** (queue for when we hit production):
+
+1. `GET /v3/odata/employees?$expand=WorkOrders` — OData expansion
+   syntax; if SC models a nav property here, this returns the list
+   inline.
+2. `GET /v3/odata/users({id})?$expand=...` — same idea on users.
+3. `GET /v3/odata/workorders?$filter=Assignee/Id eq {employee_id}`
+   — filter from the WO side if the Assignee complex type is
+   reachable.
+4. Inspect the network tab of the SC web UI while clicking an
+   employee — whatever URL the UI hits is, by definition, reachable.
+
+**If we find it**, integration shape:
+
+- New `vendor.sc_assigned_work_orders` relation (computed on-demand,
+  not stored — SC is source of truth).
+- Vendor detail page: a "Tech-assigned in SC" panel above (or beside)
+  the Brenk-tracked active-WOs list. Distinguish visually so Daryl
+  knows which is which.
+- No write path. SC owns the assignment; we just read.
+
+**If we don't find it** (likely sandbox-only behavior persists into
+prod), this becomes a write-back feature — Daryl assigns in our app,
+we PATCH the SC Assignee field. That depends on `/v3/workorders/{id}`
+accepting writes, which is a separate Phase 1.5 investigation.

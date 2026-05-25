@@ -266,29 +266,55 @@ the two pages that directly attack Daryl's "WO got lost" failure modes.
    ready to send" / "Sent" / "Paid". Invoice detail view matches
    Tailwind UI's invoice template (line items, totals, activity).
    This is Sue's-clipboard replacement and directly unloads the
-   biggest current admin burden.
-3. **Markup helper.** Settings page captures Daryl's markup-board
-   reference (per-trade defaults? Per-vendor defaults? Just notes?
-   Open question for Daryl). Surfaces inline on invoice-detail.
-4. **Junction table for multi-vendor-per-WO.** Today's model is a
+   biggest current admin burden. Markup helper (below) surfaces
+   inline here.
+3. **Markup helper.** Per-trade default markup % captured in
+   Settings, suggested (never auto-applied) on the invoice detail
+   for the WO's trade. Full design captured in the "Markup Helper
+   Design" section below — Daryl does the math in his head today
+   so we'll need to iterate; this v1 is just a starting shape.
+4. **SC employee → WO assignment mapping (research + spike).**
+   In the SC web UI, Daryl can see which work orders are assigned
+   to each employee. Our v3 API probe (May 19 session) found the
+   per-WO `Assignee` field empty across all 341 sandbox WOs, so we
+   concluded it wasn't reachable — but that conclusion may have
+   been sandbox-specific. We need to:
+     - Try `/v3/odata/users/{id}/...` and `/v3/odata/employees/{id}/...`
+       variations to see if a per-employee WO list endpoint exists.
+     - Check whether production SC has the Assignee field populated
+       (it almost certainly does, since the web UI reads it).
+     - If we can pull it, surface it on the vendor detail page as
+       a "Tech-assigned in SC" panel next to our Brenk-native
+       assignment. Two sources of truth that we can cross-reference
+       when Daryl asks "did I tell the vendor about this one yet?"
+   This is research, not implementation — capture findings in
+   `docs/architecture/servicechannel-api.md` once we know more.
+5. **Junction table for multi-vendor-per-WO.** Today's model is a
    single `assigned_vendor_id`. Daryl sometimes splits one WO across
    two trades (locksmith + electrical, say) — migrate to a
    `wo_vendor_assignments` join table when the funnel work surfaces
    the need.
-5. **Production cutover.** Spin up the second free-tier Supabase
+6. **Production cutover.** Spin up the second free-tier Supabase
    project, `alembic upgrade head`, run the worker once to seed
    `trades` and `vendors` from prod SC, then
    `python scripts/export_vendors_for_cutover.py | psql "$PROD..."`
    and click "Sync from ServiceChannel". Targeting end of Phase 1.
+   The SC employee→WO research above is a natural pairing for this
+   step, since the sandbox data is unreliable.
 
-**Open questions for the next session:**
-- How does Daryl want to express his markup-board rules? Static
-  reference card editable in Settings? Per-trade default %?
-  Per-vendor default %? Just free-text notes he can refer to?
-  Becomes blocking when we start the invoice queue.
-- Should the trades picker visually group Brenk-custom vs SC-catalog
-  trades, or sort alphabetically together? Worth a UX call after
-  Daryl actually uses it.
+**Open questions for the next session:** none currently blocking.
+
+**Resolved (2026-05-21):**
+- *Markup-board rule shape* — per-trade default markup % stored on
+  the Trade model, surfaced as a suggestion on invoice detail with
+  a manual override. Daryl edits the defaults table from Settings.
+  See "Markup Helper Design" below. **This is v1. Daryl currently
+  does the math in his head — expect to iterate as he uses it.**
+- *Trades-picker grouping* — mix Brenk-custom and SC-catalog trades
+  together alphabetically (no visual grouping). Their purpose in
+  the modal is just to help Daryl identify the right vendor; the
+  origin of the label doesn't matter to him operationally. **Already
+  this way in the form modal — no work needed.**
 
 **Other items still deferred:**
 - ~10 pre-existing ruff errors in `config.py`, `migrations/env.py`,
@@ -453,13 +479,131 @@ read/reply, reminder cadence.
 **Phase 4:** AI assistance — compose vendor texts, flag at-risk WOs
 proactively, suggest markup from past patterns.
 
+### Markup Helper Design (v1)
+
+Daryl currently does the markup calculation in his head. He has a
+loose mental model (doors get more, plumbing gets less, etc.) and
+his rule-of-thumb range is **65% minimum, 200% maximum**, with most
+jobs landing somewhere in between. The goal of the markup helper is
+NOT to automate the decision — it's to give Daryl a quick
+"reasonable starting point" he can lean on instead of recomputing
+from scratch every time, while keeping him fully in control.
+
+**Decided 2026-05-21. Subject to iteration once Daryl uses it.**
+
+#### Data model
+
+Add one nullable column to `trades`:
+
+| Column                      | Type    | Notes                       |
+|-----------------------------|---------|-----------------------------|
+| `default_markup_percent`    | NUMERIC | e.g. 75.00 for 75%. NULL = no default set yet. |
+
+Why on `trades`, not a separate `markup_rules` table:
+- Daryl's mental model already keys off trade ("doors get more").
+- One row per trade keeps the editing surface small (he just
+  pulls up Settings and edits a table).
+- If we ever need conditional rules ("per trade per client", "per
+  vendor"), we can refactor later without losing the v1 data —
+  the column just becomes the fallback.
+
+The `wo_invoices` (or equivalent) row we create when Daryl marks a
+WO as invoiced should store the **actual markup % he used**, not
+just the suggested one. That way Phase 4 AI can learn from real
+patterns rather than from defaults that may never have matched
+reality.
+
+#### Settings page
+
+A "Markups" panel on Settings shows a table:
+
+```
+Trade                                Default %    Notes
+-----------------------------------------------------------------
+Backflow Inspections                       75    
+Commercial Door Repair                     85    Higher — specialty
+DOORS (SC catalog)                         85    
+Electrical                                 70    
+Flooring                                   75    
+…
+```
+
+Sorted alphabetically (matching the trades picker). All trades
+appear, both Brenk-custom and SC-catalog — they're functionally
+equivalent for this purpose. Inline-editable; a save action per
+row, no global "save all" so partial edits are safe. Empty
+percentage = NULL = no suggestion offered (the invoice helper
+falls through to "enter manually").
+
+A small `notes` text field per row gives Daryl somewhere to jot
+"premium work, +10%" or "this trade is always a flat fee, %
+doesn't make sense" without inventing extra columns.
+
+#### Invoice detail surface
+
+On the invoice-detail view for a WO, render a "Markup helper" card
+on the right rail (same column as the WO detail page's workflow
+checklist):
+
+```
+┌─ Markup helper ──────────────────────────┐
+│  Suggested: 85% (Commercial Door Repair) │
+│                                          │
+│  Vendor cost   $   320.00                │
+│  ───────────── ────────                  │
+│  Markup        [ 85 ] %    →  $272.00    │
+│  Total bill                $ 592.00      │
+│                                          │
+│  [Apply this markup]                     │
+└──────────────────────────────────────────┘
+```
+
+- The percentage input is pre-filled with the trade default, but
+  fully editable — Daryl can override per invoice.
+- The "Suggested: 85% (Commercial Door Repair)" attribution makes
+  it clear *why* this number, so Daryl trusts (or distrusts) the
+  suggestion explicitly.
+- If no default exists for the trade, the suggestion line reads
+  "No default set — set one in Settings" with a link, and the
+  input starts empty.
+- The actual % Daryl ends up using is what gets saved to the
+  invoice row.
+
+#### What we are explicitly NOT building in v1
+
+- **Per-vendor markup overrides.** Premature without data on
+  whether Daryl actually thinks "I always pay Larry more" or just
+  "doors get more, and Larry does doors."
+- **Per-client markup overrides.** Same reason.
+- **AI-suggested markup based on history.** Phase 4.
+- **Auto-applying the markup.** Suggestion only. Daryl approves
+  every invoice; we don't sneak numbers past him.
+- **Migrating the SC-catalog `DOORS` and Brenk's `Commercial Door
+  Repair` into one canonical trade.** They coexist today; once
+  Daryl tells us he never uses one, we can deprecate.
+
+#### Iteration plan
+
+Once Daryl has used this on, say, a dozen real invoices, ask:
+
+- Is the per-trade default actually matching what you ended up
+  choosing? (If not consistently, the model is wrong — maybe it
+  really IS per-vendor.)
+- Is the suggested vs actual gap concentrated by trade? By vendor?
+  By job size? (Data will tell us where conditional rules earn
+  their keep.)
+- Are you bothered by the suggestion appearing for every job? (If
+  it's noise, we'd want to suppress it when Daryl has clearly
+  developed a different pattern.)
+
 ### Open questions for the next session
 
 - Does Charles have an existing vendor list to import, or start
-  empty?
-- How does Daryl want to express his markup-board rules? (Static
-  reference card editable in Settings? Per-trade defaults? Per-vendor
-  defaults? Just notes?)
+  empty? *(Answered May 18 — Daryl shared his contact list. Done.)*
+- ~~How does Daryl want to express his markup-board rules?~~
+  *(Answered May 21 — see "Markup Helper Design" above.)*
+- ~~Should the trades picker visually group Brenk-custom vs
+  SC-catalog trades?~~ *(Answered May 21 — mix alphabetically.)*
 - Color-coding pink/yellow/orange/green for SC stages — should we
   match SC's exact shades, or use cleaner Tailwind colors that map to
   the same conceptual stage?

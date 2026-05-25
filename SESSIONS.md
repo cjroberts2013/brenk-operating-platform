@@ -8,6 +8,50 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 21, 2026 — ~30 min (docs only)
+
+Short docs-only checkpoint. Resolved two open questions and captured
+one new research item.
+
+### Decisions captured
+
+- **Markup-board rule shape:** per-trade default markup % on the
+  `trades` table, suggested (never auto-applied) on the invoice
+  detail with a manual override input. Settings page exposes an
+  inline-editable table of all trades + defaults + free-text notes.
+  Daryl currently does the math in his head, so v1 is a starting
+  point — we'll iterate once he tells us what's actually missing.
+  Full design captured in CLAUDE.md → "Markup Helper Design (v1)".
+- **Trades-picker grouping:** mix Brenk-custom and SC-catalog trades
+  together alphabetically, no visual separation. The picker is just
+  there to identify the right vendor; the origin of the label is
+  irrelevant. Already this way in the form modal — no work needed.
+
+### Research item added
+
+Daryl pointed out that the SC web UI exposes per-employee work-order
+assignments. Our May 19 probe found the per-WO `Assignee` field empty
+across all 341 sandbox WOs, but that's likely a sandbox-only
+condition. New section in `docs/architecture/servicechannel-api.md`
+lists the next probes to run (OData `$expand`, filter syntax, web-UI
+network-tab inspection) and the integration shape if we find it —
+a "Tech-assigned in SC" panel on the vendor detail page,
+read-only, cross-referenced against our Brenk-native assignment.
+
+### Up Next
+
+Unchanged from the May 20-21 plan. With the markup design captured,
+the **Invoice queue** is no longer blocked on a Daryl decision — we
+can build the v1 surface and iterate. Recommended order:
+
+1. Dashboard pipeline funnel.
+2. Invoice queue (now unblocked by the markup design).
+3. SC employee→WO research (paired with the prod cutover).
+4. Multi-vendor-per-WO junction (when the funnel surfaces the need).
+5. Production cutover.
+
+---
+
 ## Session: May 20–21, 2026 — ~3 hours
 
 Polish session on the Work Orders + Vendors views: dial back the SC
