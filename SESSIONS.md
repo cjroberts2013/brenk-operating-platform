@@ -8,6 +8,148 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 25, 2026 — ~5 hours
+
+Built the Invoice Queue — Sue's-clipboard replacement. Four-tab page,
+per-tab helper text, markup helper card on WO detail, Settings page
+gets a markup-defaults table, and the data model now captures
+vendor cost as labor + material separately so Phase 4 analytics can
+ask where the money's going. Also confirmed the SC Invoice API
+surface for the Phase 1.5 write-back work.
+
+### Accomplishments
+
+**Backend: invoice-queue data model + endpoints.**
+- New columns on `trades`: `default_markup_percent` (suggested,
+  never auto-applied).
+- New columns on `work_orders`: `brenk_labor_cost`,
+  `brenk_material_cost`, `brenk_markup_percent`, `brenk_marked_up_at`,
+  `brenk_paid_at`. All **Brenk-confidential** — privacy boundary
+  documented in the model docstring + `CLAUDE.md` "Things To Avoid"
+  + the per-field comments in the Pydantic schemas.
+- PATCH `/api/v1/work-orders/{id}` accepts these new fields. Setting
+  markup auto-stamps `brenk_marked_up_at` on first set; subsequent
+  edits leave the original moment alone. `paid: "now"` / `"clear"`
+  toggles `brenk_paid_at`.
+- PATCH `/api/v1/trades/{id}` lets Settings edit the per-trade
+  default markup %.
+- `?invoice_tab=…` filter on the WO list endpoint. Four tabs:
+  `ready_to_markup`, `marked_up`, `sent`, `paid`. Composite filters
+  share the source-of-truth stage clauses from `pipeline.py`.
+
+**Three different money numbers — keep them straight.**
+- This earned its own table in CLAUDE.md after the first cut of the
+  markup helper auto-pulled NTE as the cost basis. NTE is the
+  client-side ceiling (set by SC, visible to client); the vendor
+  costs are what Brenk pays the sub (operator-entered, never sent
+  to SC); markup is Brenk's margin on top. Total bill = (labor +
+  material) × (1 + markup/100), must be ≤ NTE.
+
+**Labor + material split.**
+- Originally added `brenk_vendor_cost` as one number. Charles asked
+  for labor and materials tracked separately so Phase 4 analytics
+  can slice spend by category. Replaced with `brenk_labor_cost`
+  and `brenk_material_cost` (rolled back the original migration in
+  dev, generated a fresh one — never committed the stale shape).
+  Subtotal is computed, not stored.
+
+**Frontend: /invoices page.**
+- Four tabs with live counts in the nav. Per-tab columns adapt to
+  the workflow (no markup column on "Ready to mark up"; total bill
+  + sent date on "Sent"; just paid date on "Paid").
+- Per-tab helper banner explains in plain English what's in the
+  tab and what action moves a row forward.
+- "Vendor cost" column shows labor + material summed; falls back
+  to "Awaiting vendor bill" when nothing's been entered yet.
+
+**Frontend: Markup helper card on WO detail.**
+- Right-rail card. NTE shown read-only as a ceiling reference.
+  Labor cost + material cost as separate inputs. Computed
+  subtotal. Markup % with attribution to the trade default if any.
+  Live total-bill calculation that turns red and shows an inline
+  warning if it exceeds NTE.
+- Privacy reminder banner at the top: "Vendor costs and markup
+  stay private to Brenk; never sent to ServiceChannel."
+- Single Save button covers all three inputs. Clear-markup button
+  appears only when there's a saved markup (returns the WO to
+  "Ready to mark up" without losing vendor costs).
+- Mark paid / Undo controls in a separate band below.
+
+**Frontend: Settings → Default markup by trade.**
+- Inline-editable table of all trades + their default %. Save
+  button activates only when dirty. Enter key also saves. Brenk-
+  custom trades get a small tag so Daryl can see which labels
+  come from him vs SC. Info banner shows X-of-Y coverage.
+
+**Sidebar: new "Invoices" entry** (BanknotesIcon).
+
+**SC API discovery (Phase 1.5 anchor).**
+- Charles shared the SC Swagger UI list for the Invoices group.
+  Captured the relevant endpoints in
+  `docs/architecture/servicechannel-api.md` → "Invoice endpoints —
+  Phase 1.5 anchor": `POST /invoices` exists, plus an
+  `InvoiceRequirements` GET for upfront validation, an
+  `InvoiceRejectionReasons` GET for failure context, and an
+  `/odata/invoices` list endpoint that may let us auto-derive
+  "Sent → Approved → Paid" status (replacing the manual Mark paid
+  button). PUT reject/onhold/approve are client-side — we observe,
+  don't call. Documented the spike plan for when Phase 1.5 starts.
+
+### Decisions & Observations
+
+- **One source of truth for stage definitions** (continued from
+  previous session). The invoice-queue tabs use the same
+  `stage_filter_clauses` from `app/services/pipeline.py` that the
+  dashboard uses for counting. Tab counts and list page row counts
+  are guaranteed to match by construction.
+- **NTE is sacred.** First cut of the markup helper used NTE as
+  the cost basis for markup, which is wrong — NTE is the ceiling,
+  not the cost. Caught by Charles immediately. Now documented in
+  CLAUDE.md with a three-row table and a "Things To Avoid" rule.
+- **Vendor cost = labor + material, split at entry time.** Could
+  have stored one combined number and split later if needed, but
+  splitting at entry preserves the breakdown Phase 4 analytics
+  will want. The subtotal is computed; the two columns are the
+  source of truth.
+- **Markup helper is intentionally not auto-applied.** Even when
+  a trade has a default, the input is pre-filled but Daryl still
+  has to hit Save. The "Markup Helper Design" section of CLAUDE.md
+  spells out why — Daryl approves every invoice, we don't sneak
+  numbers past him.
+- **Brenk-confidential fields are surfaced in three places now:**
+  the model docstring, the Pydantic schema field comments, and a
+  "Things To Avoid" rule. If anyone ever wires SC submission, the
+  warning is impossible to miss.
+- **Phase 1.5 (invoice push to SC) is no longer speculative.** The
+  endpoint exists (`POST /invoices`). The next step there is an
+  API spike, not exploratory research.
+
+### Up Next
+
+The two "directly attack Daryl's failure modes" pages are now both
+live — Dashboard funnel (last session) + Invoice queue (this one).
+Remaining Phase 1 chunks:
+
+1. **SC employee → WO assignment research** (paired with prod
+   cutover).
+2. **Multi-vendor-per-WO junction table** — when the funnel
+   surfaces the need.
+3. **Production cutover** — export script + email-fallback ready;
+   second free-tier Supabase project, alembic upgrade, seed from
+   prod SC, click Sync.
+4. **Phase 1.5: invoice push to SC** via `POST /invoices`. Spike
+   plan documented; ready to start whenever Charles wants the
+   manual SC-entry step removed.
+
+### Open questions
+
+- Auto-submit invoices to SC, or click-to-prefill (open SC's form
+  with values populated, Daryl reviews + clicks Submit himself)?
+  Click-to-prefill keeps Daryl's final review beat; auto-submit
+  removes more friction. Decision deferred to Phase 1.5 kickoff.
+
+---
+
 ## Session: May 21, 2026 (part 2) — ~2.5 hours
 
 Built v1 of the Dashboard pipeline funnel — Daryl's at-a-glance read

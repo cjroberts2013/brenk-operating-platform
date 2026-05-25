@@ -39,6 +39,12 @@ class Trade(Base, TimestampMixin):
     sc_trade_id: Mapped[int | None] = mapped_column(Integer, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
 
+    # Brenk-internal markup default. Null = no default set yet; the
+    # invoice helper offers no suggestion and Daryl enters a number
+    # manually. See the "Markup Helper Design" section of CLAUDE.md
+    # for the full rationale.
+    default_markup_percent: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+
     work_orders: Mapped[list["WorkOrder"]] = relationship(back_populates="trade")
 
     def __repr__(self) -> str:
@@ -56,7 +62,9 @@ class Client(Base, TimestampMixin):
     __tablename__ = "clients"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    sc_subscriber_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    sc_subscriber_id: Mapped[int] = mapped_column(
+        BigInteger, unique=True, nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     short_name: Mapped[str | None] = mapped_column(String(255))
     is_outsourced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -188,7 +196,9 @@ class WorkOrder(Base, TimestampMixin):
 
     # Identity
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    sc_work_order_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    sc_work_order_id: Mapped[int] = mapped_column(
+        BigInteger, unique=True, nullable=False, index=True
+    )
     sc_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     sc_purchase_number: Mapped[str | None] = mapped_column(String(50))
 
@@ -238,6 +248,32 @@ class WorkOrder(Base, TimestampMixin):
     # Counts (denormalized from SC inline data)
     notes_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     attachments_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Brenk-internal invoice fields (added 2026-05-21). These don't
+    # exist in SC — they're what we track ourselves to replace Sue's
+    # clipboard pile.
+    #
+    # PRIVACY: vendor cost (labor + material), markup, and the
+    # derived total are **Brenk-confidential**. They never leave our
+    # database — not in API responses to external systems, not in
+    # invoices pushed to SC. SC only ever sees the final total-bill
+    # number Daryl manually enters into SC's own invoice form (which
+    # is the public-facing bill to the client). NTE (already on this
+    # row) is the client-side ceiling we can't exceed.
+    #
+    # Total bill = (labor_cost + material_cost) * (1 + markup/100)
+    # Must be ≤ NTE.
+    #
+    # Why labor + material separately, not one combined number:
+    #   Phase 4 analytics want to see where the money's going. A trade
+    #   that's 70% materials needs a different markup strategy than
+    #   one that's 70% labor. Stored separately so we don't lose the
+    #   distinction at entry time; combined arithmetically when needed.
+    brenk_labor_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    brenk_material_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    brenk_markup_percent: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    brenk_marked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    brenk_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Sync metadata
     raw_data: Mapped[dict | None] = mapped_column(JSONB)
@@ -312,4 +348,6 @@ class WorkOrderStatusHistory(Base):
     work_order: Mapped["WorkOrder"] = relationship(back_populates="status_history")
 
     def __repr__(self) -> str:
-        return f"<StatusHistory wo={self.work_order_id} {self.primary_status}/{self.extended_status}>"
+        return (
+            f"<StatusHistory wo={self.work_order_id} {self.primary_status}/{self.extended_status}>"
+        )

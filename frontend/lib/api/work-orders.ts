@@ -14,6 +14,7 @@ import type {
   WorkOrderNoteRef,
   WorkOrderSyncStatus,
   WorkOrderSyncSummary,
+  WorkOrderUpdate,
 } from './types'
 
 export function listWorkOrders(
@@ -37,5 +38,15 @@ export function getWorkOrderSyncStatus(): Promise<WorkOrderSyncStatus> {
 export function syncWorkOrdersFromSc(): Promise<WorkOrderSyncSummary> {
   return apiFetch<WorkOrderSyncSummary>('/api/v1/work-orders/sync', {
     method: 'POST',
+  })
+}
+
+export function updateWorkOrder(
+  id: number,
+  body: WorkOrderUpdate,
+): Promise<WorkOrderDetail> {
+  return apiFetch<WorkOrderDetail>(`/api/v1/work-orders/${id}`, {
+    method: 'PATCH',
+    body,
   })
 }

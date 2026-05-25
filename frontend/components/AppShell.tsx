@@ -28,6 +28,7 @@ import {
 import {
   Bars3Icon,
   BellIcon,
+  BanknotesIcon,
   ChartPieIcon,
   Cog6ToothIcon,
   HomeIcon,
@@ -48,6 +49,7 @@ type NavItem = {
 const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: HomeIcon },
   { name: 'Work Orders', href: '/work-orders', icon: ClipboardDocumentListIcon },
+  { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
   { name: 'Vendors', href: '/vendors', icon: UsersIcon },
   { name: 'Reports', href: '/reports', icon: ChartPieIcon },
 ]

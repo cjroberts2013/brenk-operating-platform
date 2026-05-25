@@ -25,6 +25,7 @@ export type TradeRef = {
   id: number
   sc_trade_id: number | null
   name: string
+  default_markup_percent: string | null // serialized Decimal
 }
 
 export type VendorRef = {
@@ -43,9 +44,21 @@ export type WorkOrderSummary = {
   trade: TradeRef | null
   location: LocationRef | null
   client: ClientRef | null
+  assigned_vendor: VendorRef | null
   nte: string | null // serialized as a decimal string by FastAPI
   scheduled_date: string | null // ISO 8601
   sc_updated_date: string | null // ISO 8601
+  // Brenk-invoice fields — surfaced on the list so the invoice
+  // queue tabs can render vendor cost + markup + paid inline.
+  // Labor + material are what Brenk pays the sub-vendor, split for
+  // analytics (Phase 4 wants to see where the money's going).
+  // Total vendor cost = labor + material. NEVER auto-derived from
+  // NTE — those are different numbers. Brenk-confidential.
+  brenk_labor_cost: string | null
+  brenk_material_cost: string | null
+  brenk_markup_percent: string | null
+  brenk_marked_up_at: string | null
+  brenk_paid_at: string | null
 }
 
 export type WorkOrderDetail = {
@@ -90,12 +103,42 @@ export type WorkOrderDetail = {
   auto_complete: boolean
   auto_invoice: boolean
 
+  // Brenk-confidential — never pushed to SC. See backend model
+  // docstring for the full privacy boundary.
+  brenk_labor_cost: string | null
+  brenk_material_cost: string | null
+  brenk_markup_percent: string | null
+  brenk_marked_up_at: string | null
+  brenk_paid_at: string | null
+
   notes_count: number
   attachments_count: number
 
   last_synced_at: string
   created_at: string
   updated_at: string
+}
+
+export type InvoiceTab = 'ready_to_markup' | 'marked_up' | 'sent' | 'paid'
+
+export const INVOICE_TAB_LABELS: Record<InvoiceTab, string> = {
+  ready_to_markup: 'Ready to mark up',
+  marked_up: 'Marked up, ready to send',
+  sent: 'Sent',
+  paid: 'Paid',
+}
+
+/** Per-tab helper copy, shown right under the tab nav. Plain English,
+ *  written for Sue/Daryl, not engineers. Explains what's in the tab
+ *  and what action moves a row to the next tab. */
+export const INVOICE_TAB_HELP: Record<InvoiceTab, string> = {
+  ready_to_markup:
+    "Work orders the store has confirmed and that haven't been priced yet. Open a work order, enter what the vendor charged Brenk, set the markup, and it moves to “Marked up, ready to send.” These numbers stay private to Brenk — they're never sent to ServiceChannel.",
+  marked_up:
+    'Priced and ready to invoice in ServiceChannel. The total bill shown is Brenk\'s — only Daryl enters the final amount into SC\'s invoice form. After SC processes the invoice, the next sync will move the WO into “Sent.”',
+  sent:
+    'Submitted to ServiceChannel and awaiting payment. When the client pays Brenk, click “Mark paid” on the WO to move it to the Paid tab.',
+  paid: 'Closed out. Kept for historical reference — every paid job, with the vendor cost + markup Brenk used.',
 }
 
 export type WorkOrderListResponse = {
@@ -150,6 +193,9 @@ export type WorkOrderListParams = {
   updated_since?: string // ISO 8601
   q?: string
   stage?: PipelineStageKey
+  /** Invoice-queue tab filter — same source-of-truth as the backend
+   *  `app/api/v1/endpoints/work_orders.py` invoice_tab param. */
+  invoice_tab?: InvoiceTab
   page?: number
   page_size?: number
 }
@@ -246,9 +292,27 @@ export type VendorCreate = {
 /** Shape of the body for PATCH /api/v1/vendors/{id}. All fields optional. */
 export type VendorUpdate = Partial<VendorCreate>
 
-/** Shape of the body for PATCH /api/v1/work-orders/{id}. */
+/** Shape of the body for PATCH /api/v1/work-orders/{id}.
+ *  Omitting a field leaves the column untouched; setting to null
+ *  clears it (except `paid`, which uses the "now" / "clear" strings). */
 export type WorkOrderUpdate = {
   assigned_vendor_id?: number | null
+  /** Decimal as string. Labor portion of what Brenk pays the
+   *  sub-vendor. Brenk-confidential. Null clears. */
+  brenk_labor_cost?: string | null
+  /** Decimal as string. Materials portion of what Brenk pays the
+   *  sub-vendor. Brenk-confidential. Null clears. */
+  brenk_material_cost?: string | null
+  /** Decimal as string. Setting auto-stamps brenk_marked_up_at on
+   *  first set; subsequent edits don't bump it. Null clears both. */
+  brenk_markup_percent?: string | null
+  /** "now" stamps brenk_paid_at=now(); "clear" resets to null. */
+  paid?: 'now' | 'clear'
+}
+
+/** Shape of the body for PATCH /api/v1/trades/{id}. */
+export type TradeUpdate = {
+  default_markup_percent?: string | null
 }
 
 // =============================================================================

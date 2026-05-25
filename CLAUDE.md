@@ -471,7 +471,12 @@ step 5 of the build order.
 
 **Phase 1.5** (small follow-on, after SC write-API exploration):
 - "Accept" / "Decline" buttons from our app write to SC
-- Invoice line items push to SC
+- **Invoice line items push to SC** — `POST /invoices`. Endpoint
+  confirmed to exist; spike plan + adjacent read endpoints (for
+  validation upfront + auto-derive Sent/Approved/Paid state) live
+  in `docs/architecture/servicechannel-api.md` → "Invoice endpoints
+  — Phase 1.5 anchor". Once shipped, replaces the manual "Daryl
+  types the total into SC's invoice form" step.
 - Status change writes (limited — most stages SC computes itself)
 
 **Phase 2:** Email integration — parse SC's emails, proactively
@@ -495,15 +500,50 @@ from scratch every time, while keeping him fully in control.
 
 **Decided 2026-05-21. Subject to iteration once Daryl uses it.**
 
+#### Three different money numbers — keep them straight
+
+This caused a real bug. Spelling it out:
+
+| Field                              | Where it comes from | Visible to client? | Role |
+|------------------------------------|---------------------|---------------------|------|
+| `work_orders.nte`                  | SC (client sets it) | Yes (client owns it) | **Ceiling.** Brenk can't bill the client more than this. |
+| `work_orders.brenk_labor_cost`     | Brenk operator enters after the sub-vendor bills Brenk | **No — Brenk-confidential.** Never pushed to SC. | Vendor's labor charge. |
+| `work_orders.brenk_material_cost`  | Brenk operator enters after the sub-vendor bills Brenk | **No — Brenk-confidential.** Never pushed to SC. | Vendor's materials/parts charge. |
+| `work_orders.brenk_markup_percent` | Brenk operator decides per job | **No — Brenk-confidential.** Never pushed to SC. | % on top of vendor subtotal. Brenk's margin. |
+
+**Vendor subtotal** = labor + material. Stored separately so Phase 4
+analytics can ask "where's the money going?" across trades and
+vendors. Combined arithmetically when needed (the helper card
+shows the subtotal as a derived line, and the invoice-queue table
+shows it under "Vendor cost").
+
+**Total bill** Brenk invoices the client =
+`(brenk_labor_cost + brenk_material_cost) * (1 + brenk_markup_percent / 100)`,
+and this must be `<=` NTE. The markup helper UI surfaces a red
+warning when this constraint is violated; the backend lets you save
+it anyway (Daryl might be entering values mid-edit) but operationally
+it means the markup or one of the vendor costs needs to come down
+before invoicing.
+
+**Vendor costs are NOT auto-derived from NTE.** Different numbers,
+different sources. The first cut of the markup helper auto-pulled
+NTE as the cost basis — that was wrong. Labor + material are always
+operator-entered from the vendor's actual bill.
+
 #### Data model
 
-Add one nullable column to `trades`:
+Columns added 2026-05-21:
 
-| Column                      | Type    | Notes                       |
-|-----------------------------|---------|-----------------------------|
-| `default_markup_percent`    | NUMERIC | e.g. 75.00 for 75%. NULL = no default set yet. |
+| Column                             | Type        | Notes                                |
+|------------------------------------|-------------|--------------------------------------|
+| `trades.default_markup_percent`    | NUMERIC     | e.g. 75.00 for 75%. NULL = no default. |
+| `work_orders.brenk_labor_cost`     | NUMERIC     | Vendor's labor charge. **Brenk-confidential.** |
+| `work_orders.brenk_material_cost`  | NUMERIC     | Vendor's materials charge. **Brenk-confidential.** |
+| `work_orders.brenk_markup_percent` | NUMERIC     | Chosen markup %. **Brenk-confidential.** |
+| `work_orders.brenk_marked_up_at`   | TIMESTAMPTZ | Auto-stamped on first markup set. |
+| `work_orders.brenk_paid_at`        | TIMESTAMPTZ | Manual: "client paid Brenk." |
 
-Why on `trades`, not a separate `markup_rules` table:
+Why per-trade defaults on `trades`, not a separate `markup_rules` table:
 - Daryl's mental model already keys off trade ("doors get more").
 - One row per trade keeps the editing surface small (he just
   pulls up Settings and edits a table).
@@ -511,11 +551,9 @@ Why on `trades`, not a separate `markup_rules` table:
   vendor"), we can refactor later without losing the v1 data —
   the column just becomes the fallback.
 
-The `wo_invoices` (or equivalent) row we create when Daryl marks a
-WO as invoiced should store the **actual markup % he used**, not
-just the suggested one. That way Phase 4 AI can learn from real
-patterns rather than from defaults that may never have matched
-reality.
+The actual markup % Daryl chose on each WO is stored on the WO
+itself, not the trade default — Phase 4 AI learns from real
+choices, not from defaults that may never have matched reality.
 
 #### Settings page
 
@@ -550,17 +588,27 @@ on the right rail (same column as the WO detail page's workflow
 checklist):
 
 ```
-┌─ Markup helper ──────────────────────────┐
-│  Suggested: 85% (Commercial Door Repair) │
-│                                          │
-│  Vendor cost   $   320.00                │
-│  ───────────── ────────                  │
-│  Markup        [ 85 ] %    →  $272.00    │
-│  Total bill                $ 592.00      │
-│                                          │
-│  [Apply this markup]                     │
-└──────────────────────────────────────────┘
+┌─ Markup helper ──────────────────────────────┐
+│  Suggested 85% (Commercial Door Repair)      │
+│  🔒 Costs + markup stay private to Brenk;    │
+│     never sent to ServiceChannel.            │
+│                                              │
+│  NTE (max billable to client)      $ 250.00  │
+│  Labor cost   (vendor's labor)   $ [120.00]  │
+│  Material cost (parts/materials) $ [ 60.00]  │
+│  ─────────────────────────────────────────   │
+│  Vendor cost (subtotal)            $ 180.00  │
+│  Markup                          [ 38 ] %    │
+│  ─────────────────────────────────────────   │
+│  Total bill                        $ 248.40  │
+│                                              │
+│  [   Save   ]   [Clear markup]               │
+└──────────────────────────────────────────────┘
 ```
+Labor + material are tracked separately so Phase 4 analytics can
+slice spend by category. The subtotal is computed, not editable. If
+total bill > NTE the line turns red and an inline warning calls it
+out — Daryl needs to bring the markup or a cost down.
 
 - The percentage input is pre-filled with the trade default, but
   fully editable — Daryl can override per invoice.
@@ -644,6 +692,18 @@ branching feature requires the Pro plan, which we're not on.)
   `Schema(field=…)` constructors silently 500 the next time the
   schema adds a required field unless every caller is updated in
   lock-step.
+- Don't conflate `work_orders.nte` with the vendor cost fields.
+  NTE is the **client-side ceiling** (set by SC, public to the
+  client); `brenk_labor_cost` and `brenk_material_cost` are **what
+  Brenk pays the sub-vendor** (operator-entered, Brenk-confidential,
+  never sent to SC). The total bill Daryl invoices the client equals
+  `(brenk_labor_cost + brenk_material_cost) × (1 + brenk_markup_percent/100)`
+  and must be ≤ NTE. The first cut of the markup helper used NTE as
+  the cost basis, which was wrong.
+- Don't push `brenk_labor_cost`, `brenk_material_cost`, or
+  `brenk_markup_percent` to SC. They're Brenk-internal margin data.
+  The only number that ever goes to SC is the final total Daryl
+  manually enters into SC's own invoice form.
 
 ## Communication With Charles
 

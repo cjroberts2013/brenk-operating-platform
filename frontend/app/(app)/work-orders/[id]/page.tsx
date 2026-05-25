@@ -5,6 +5,7 @@ import { ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/20/so
 
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
+import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
 import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
 import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
 import { ApiError } from '@/lib/api/server'
@@ -165,6 +166,8 @@ export default async function WorkOrderDetailPage({
               />
             }
           />
+
+          <MarkupHelper wo={wo} />
 
           <section className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
             <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">

@@ -148,6 +148,82 @@ Our client respects `Retry-After` automatically.
 - How sub-vendors are represented (or whether they're not at all)
 - Webhooks: ServiceChannel offers them — could replace polling for some events
 
+## Invoice endpoints — Phase 1.5 anchor (2026-05-22)
+
+SC's `Invoices` API surface (confirmed from Charles's screenshot of the
+SC Swagger UI). Documented here so Phase 1.5 — "push invoice line items
+to SC" — doesn't start from scratch when we get to it.
+
+### Submit path
+
+These are what we'd wire to a "Submit to ServiceChannel" button on the
+"Marked up, ready to send" tab:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/invoices` | **Add an invoice to a WO.** The actual submit. |
+| `GET`  | `/invoices/{subscriberId}/InvoiceRequirements` | Per-subscriber config: which fields are required, what GL codes are valid, attachment rules, etc. Call before submit to validate up front. |
+| `GET`  | `/invoices/{subscriberId}/OtherChargeOptions/{category}` | Lookup for the "other charges" line-item type (probably parts/misc). |
+| `GET`  | `/invoices/{subscriberId}/InvoiceRejectionReasons` | Catalog of possible rejection codes. Pre-load so a failed POST shows a human reason. |
+
+Open: the **payload shape** for `POST /invoices` — we don't know yet
+whether it wants one total, or itemized lines (labor / material /
+tax / etc.). Our data model already keeps labor + material split, so
+either shape is supportable. Probe before designing the UI.
+
+### Read path (state-sync bonus we hadn't planned)
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/odata/invoices` | List existing invoices with full state. Folded into our regular sync, this lets us **auto-derive "Sent" → "Approved" → "Paid"** instead of relying on the manual "Mark paid" button. |
+| `GET` | `/invoices/{invoiceId}` | Single-invoice detail. |
+| `GET` | `/invoices/{invoiceId}/discrepancy` | SC tells us where the submitted invoice differs from approved rates/hours. Drives a "fix this and resubmit" UI. |
+| `GET` | `/invoices/{invoiceId}/discrepancyExtended` | Same as above, more detail. |
+| `GET` | `/invoices/statistics` | Aggregate stats — could feed a Phase 4 analytics panel. |
+
+If the OData list endpoint carries `Paid` / `PaidDate`, that probably
+replaces our `brenk_paid_at` field with a synced value. We keep
+`brenk_paid_at` as the manual-override path for cases where Brenk
+sees the payment outside of SC.
+
+### Client-side endpoints (Brenk doesn't call these)
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `PUT` | `/invoices/{invoiceId}/reject` | Subscriber rejects (CubeSmart, not Brenk). |
+| `PUT` | `/invoices/{invoiceId}/onhold` | Subscriber puts on hold. |
+| `PUT` | `/invoices/{invoiceId}/approve` | Subscriber approves. |
+
+We **observe** the state these endpoints produce via the `GET`
+endpoints above; we don't ever call them ourselves.
+
+### Ambiguous — need to probe
+
+| Method | Endpoint | Note |
+|---|---|---|
+| `POST` | `/invoices/{invoiceId}/Payment` | Could be for Brenk to record an inbound payment received from the client. Or could be admin-only. |
+| `POST` | `/invoices/Payments` | Batch variant of the above. |
+| `POST` | `/invoices/Workorders/{trackingNumber}/Payment` | Same idea keyed by WO. |
+| `PATCH` | `/invoices/{invoiceId}/GlCode` | Update GL code post-submission. Useful for the "we got it wrong" flow. |
+
+### Plan for the Phase 1.5 spike (when we get there)
+
+1. **Confirm write scope.** Our current OAuth grant is password-grant
+   for reads — verify it lets us hit a POST endpoint, or whether we
+   need a different scope/grant.
+2. **Probe `POST /invoices` with a real WO.** Send minimal payload,
+   see what SC complains about, build up from there. Sandbox first.
+3. **Read `InvoiceRequirements` for each Brenk subscriber** Brenk
+   actually invoices — likely just CubeSmart in Phase 1. Capture the
+   required fields, build the submit payload to match.
+4. **Sync `GET /odata/invoices` periodically** to pick up status
+   transitions on invoices we've submitted. Decide whether this
+   replaces or augments `brenk_paid_at`.
+5. **Design the UX:** confirm dialog before POST, error surfacing on
+   failure, idempotency guard (`sc_invoiced_at IS NOT NULL` skip).
+
+---
+
 ## Research: Employee → assigned WOs mapping (2026-05-21)
 
 Daryl noted that in the SC web UI he can view an employee and see every

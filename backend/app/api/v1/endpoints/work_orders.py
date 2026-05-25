@@ -5,12 +5,13 @@ queries return data that's already been transformed from SC payloads
 into our schema — see `app.services.sync` for the sync pipeline.
 """
 
-from datetime import datetime
-from typing import Annotated
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -30,10 +31,48 @@ from app.services.sync.work_orders import sync_all_work_orders
 class WorkOrderUpdate(BaseModel):
     """PATCH body for a work order. Only Brenk-internal fields are
     writable in Phase 1 — SC-owned fields (status, dates, etc.) are
-    not exposed here. Set `assigned_vendor_id` to `null` to unassign.
+    not exposed here.
+
+    All fields are optional. Set a field to `null` to clear it; omit
+    a field to leave the DB column untouched. We use Pydantic's
+    `model_fields_set` in the endpoint to tell "absent" from "null"
+    — without that, `field: int | None = None` collapses the two.
     """
 
-    assigned_vendor_id: int | None = None
+    assigned_vendor_id: int | None = Field(default=None)
+    brenk_labor_cost: Decimal | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Labor portion of what Brenk pays the sub-vendor, in USD. Tracked "
+            "separately from materials for analytics. Brenk-confidential — "
+            "never pushed to SC."
+        ),
+    )
+    brenk_material_cost: Decimal | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Materials portion of what Brenk pays the sub-vendor, in USD. "
+            "Tracked separately from labor for analytics. Brenk-confidential "
+            "— never pushed to SC."
+        ),
+    )
+    brenk_markup_percent: Decimal | None = Field(
+        default=None,
+        ge=0,
+        le=1000,
+        description=(
+            "Brenk's chosen markup % on this WO. Range 0-1000 - Daryl's "
+            "real-world band is 65-200, but we allow zero and outliers. "
+            "Brenk-confidential — never pushed to SC."
+        ),
+    )
+    # Frontend sends `paid: "now"` to stamp paid_at = now(), or
+    # `paid: "clear"` to clear it back to null. Omitting the field
+    # leaves the column untouched. We avoid a free-form datetime here
+    # so backdating is intentional (would need a separate endpoint).
+    paid: Literal["now", "clear"] | None = Field(default=None)
 
 
 class WorkOrderSyncStatus(BaseModel):
@@ -102,6 +141,17 @@ async def list_work_orders(
             ),
         ),
     ] = None,
+    invoice_tab: Annotated[
+        Literal["ready_to_markup", "marked_up", "sent", "paid"] | None,
+        Query(
+            description=(
+                "Invoice-queue tab filter. ready_to_markup: stage=ready_to_invoice "
+                "with no markup set. marked_up: stage=ready_to_invoice with markup "
+                "set, not yet sent. sent: primary_status=INVOICED, not paid. paid: "
+                "brenk_paid_at is set."
+            ),
+        ),
+    ] = None,
     page: Annotated[int, Query(ge=1, description="1-indexed page number")] = 1,
     page_size: Annotated[
         int,
@@ -134,6 +184,22 @@ async def list_work_orders(
                 detail=(f"unknown stage {stage!r}; must be one of: {', '.join(STAGE_BY_KEY)}"),
             )
         filters.extend(stage_filter_clauses(stage))
+
+    # Invoice-queue tab filters. Each tab is a composite of pipeline
+    # stage + Brenk-internal markup/paid state. Mapping is the single
+    # source of truth shared with the frontend tab labels.
+    if invoice_tab is not None:
+        if invoice_tab == "ready_to_markup":
+            filters.extend(stage_filter_clauses("ready_to_invoice"))
+            filters.append(WorkOrder.brenk_markup_percent.is_(None))
+        elif invoice_tab == "marked_up":
+            filters.extend(stage_filter_clauses("ready_to_invoice"))
+            filters.append(WorkOrder.brenk_markup_percent.is_not(None))
+        elif invoice_tab == "sent":
+            filters.extend(stage_filter_clauses("invoiced"))
+            filters.append(WorkOrder.brenk_paid_at.is_(None))
+        elif invoice_tab == "paid":
+            filters.append(WorkOrder.brenk_paid_at.is_not(None))
 
     # Free-text search. We OR across columns the operator is likely to
     # type — WO number, SC purchase number, problem code, caller free
@@ -176,6 +242,7 @@ async def list_work_orders(
             selectinload(WorkOrder.client),
             selectinload(WorkOrder.location),
             selectinload(WorkOrder.trade),
+            selectinload(WorkOrder.assigned_vendor),
         )
         .order_by(WorkOrder.sc_work_order_id.desc())
         .offset((page - 1) * page_size)
@@ -286,9 +353,23 @@ async def update_work_order(
 ) -> WorkOrderDetail:
     """Update Brenk-internal fields on a work order.
 
-    Phase 1: only `assigned_vendor_id` is writable. Pass `null` to
-    unassign. Anything SC owns (status, dates, notes_count, etc.) is
-    not touched — those flow in via the sync worker.
+    Writable in Phase 1:
+      - `assigned_vendor_id` — pass null to unassign.
+      - `brenk_labor_cost`, `brenk_material_cost` — labor + material
+        components of what Brenk pays the sub-vendor. Tracked
+        separately for analytics; total vendor cost = labor +
+        material. Distinct from NTE (the client-side ceiling).
+        Pass a decimal to set, null to clear. Brenk-confidential.
+      - `brenk_markup_percent` — pass a decimal to set, null to clear.
+        Setting (transitioning from null to a value) auto-stamps
+        `brenk_marked_up_at = now()`. Re-setting (already non-null)
+        leaves `brenk_marked_up_at` alone — the original markup
+        moment is what we want to remember.
+      - `paid` — pass "now" to stamp `brenk_paid_at = now()`, or
+        "clear" to reset to null. Omit to leave alone.
+
+    SC-owned fields (status, dates, notes_count, etc.) are never
+    touched here — those flow in via the sync worker.
     """
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
@@ -309,6 +390,31 @@ async def update_work_order(
                     detail=f"vendor {new_vendor_id} not found",
                 )
         wo.assigned_vendor_id = new_vendor_id
+
+    if "brenk_labor_cost" in update_data:
+        wo.brenk_labor_cost = update_data["brenk_labor_cost"]
+    if "brenk_material_cost" in update_data:
+        wo.brenk_material_cost = update_data["brenk_material_cost"]
+
+    if "brenk_markup_percent" in update_data:
+        new_pct = update_data["brenk_markup_percent"]
+        was_unset = wo.brenk_markup_percent is None
+        wo.brenk_markup_percent = new_pct
+        # First-time set: stamp the timestamp. Subsequent edits don't
+        # bump it — the first markup-decided moment is what's
+        # operationally meaningful. Clearing (None) also clears the
+        # timestamp so the WO returns to "Ready to mark up" cleanly.
+        if new_pct is None:
+            wo.brenk_marked_up_at = None
+        elif was_unset:
+            wo.brenk_marked_up_at = datetime.now(UTC)
+
+    if "paid" in update_data:
+        action = update_data["paid"]
+        if action == "now":
+            wo.brenk_paid_at = datetime.now(UTC)
+        elif action == "clear":
+            wo.brenk_paid_at = None
 
     await db.commit()
     # populate_existing rebuilds the in-memory WO from the new SELECT

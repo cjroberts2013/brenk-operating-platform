@@ -1,5 +1,5 @@
 import { apiFetch } from './server'
-import type { TradeRef } from './types'
+import type { TradeRef, TradeUpdate } from './types'
 
 /** Returns all trades, ordered by name. Small list — no pagination. */
 export function listTrades(): Promise<TradeRef[]> {
@@ -12,5 +12,14 @@ export function createTrade(name: string): Promise<TradeRef> {
   return apiFetch<TradeRef>('/api/v1/trades/', {
     method: 'POST',
     body: { name },
+  })
+}
+
+/** Update a trade's Brenk-internal fields (default markup %, etc.).
+ *  Omit a field to leave it alone; set to null to clear. */
+export function updateTrade(id: number, body: TradeUpdate): Promise<TradeRef> {
+  return apiFetch<TradeRef>(`/api/v1/trades/${id}`, {
+    method: 'PATCH',
+    body,
   })
 }
