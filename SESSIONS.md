@@ -8,6 +8,140 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 25, 2026 (part 2) — ~3 hours
+
+Built Phase 5 v1: a public marketing storefront for
+`brenkfacilityservices.com` plus a dashboard editor that lets
+Daryl edit every section without touching code. Promoted ahead of
+the rest of Phase 5 work because the SC invoice-API stuff is
+parked waiting on permissions clarification.
+
+### Accomplishments
+
+**Backend: storefront data model + endpoints.**
+- New tables: `storefront_content` (singleton row keyed by id=1,
+  every page-level field as nullable columns) and
+  `storefront_services` (ordered list).
+- Single-row + ordered-list design intentionally kept simple for
+  v1. Refactor to block-based or multi-page can come later
+  without losing data.
+- `GET /api/v1/storefront/` is **public** (no auth). Mounted via a
+  new `public_router` alongside the existing `api_router` so the
+  JWT-auth dependency chain doesn't apply.
+- `PATCH /api/v1/storefront/` and `PUT /api/v1/storefront/services`
+  are authenticated. Singleton auto-creates on first GET so a
+  fresh database still serves valid JSON.
+
+**Frontend types + API client.**
+- New `lib/api/public.ts` with a no-auth fetcher (mirrors
+  `apiFetch` but skips the Supabase token attachment). Tagged
+  `fetch` with `next: { tags: ['storefront'] }` so the editor's
+  save action can call `revalidateTag('storefront', 'max')` and
+  immediately bust the public site's cache.
+- New `lib/api/storefront.ts` wraps both public and admin variants.
+
+**Dashboard editor at `/storefront`.**
+- New sidebar entry (GlobeAltIcon).
+- Form-based editor split into seven sections: Hero & Branding,
+  About, Service area, Contact, Footer, and Services (separate
+  save since it hits a different endpoint).
+- Each section has its own dirty-flag + Save button that activates
+  only when something's changed. Green "Saved" check on success.
+- Services section supports add/remove + up/down reordering via
+  arrow buttons. `sort_order` is renumbered monotonically on save.
+- "Preview" link in the header opens `/marketing` in a new tab.
+
+**Public storefront at the bare domain.**
+- Standalone layout at `app/marketing/layout.tsx` — no AppShell,
+  no auth, no Supabase client. Just the marketing page.
+- Single-page design with anchored sections: Hero, Services,
+  About, Service area, Contact, Footer. Blue palette (Tailwind
+  `blue-700` anchor) matching Daryl's brand preference. Hero +
+  About support optional images; falls back to a soft gradient
+  block when no image is set.
+- Family-business voice in the seeded copy ("answer the phone,
+  show up on time, treat every property like it's our own").
+
+**Hostname routing in `proxy.ts`.**
+- Added a bare-domain rewrite: any request whose host doesn't
+  start with `app.` (and isn't localhost) gets rewritten under
+  `/marketing/`. So `brenkfacilityservices.com/` serves the
+  storefront, `app.brenkfacilityservices.com/` serves the
+  dashboard, both from the same Next.js project.
+- `/marketing` added to `PUBLIC_PATH_PREFIXES` so the proxy's
+  auth check doesn't redirect to `/login`.
+- Local dev: storefront previewed at
+  `localhost:3000/marketing`; dashboard at `localhost:3000/`.
+
+**Seeded initial content.**
+- New `scripts/seed_storefront.py` writes Brenk-appropriate
+  starter copy: hero pitch, family-business about paragraph,
+  service-area body covering the I-35 corridor, contact info
+  pulled from Daryl's existing details, and six service cards
+  (Plumbing, Electrical, Doors & Gates, Painting & Drywall,
+  Flooring, General Building) with Heroicon mappings.
+- Idempotent — re-running resets to known defaults rather than
+  duplicating.
+
+### Decisions & Observations
+
+- **One Next.js project, hostname routing.** CLAUDE.md leaned
+  "probably two separate projects" for caching cleanliness, but
+  for v1 the single-project + proxy.ts rewrite is materially
+  simpler and lets us share the existing Supabase auth helpers.
+  Cookie scoping still works correctly because dashboard cookies
+  live on `app.<domain>` and don't leak to the bare domain. If
+  build sizes or caching strategies diverge enough later we can
+  split — no data migration required, just a `next` config move.
+- **Singleton page model over block-based.** A "real" CMS would
+  let Daryl drag-and-drop block components. We don't need that.
+  Brenk has one marketing page, fixed structure. Form-based
+  editor ships in a day vs a week of block-system work, and
+  re-modeling later doesn't lose any data.
+- **Image uploads deferred to v1.1.** The editor accepts image
+  URLs as text inputs for now. Daryl can host on his existing
+  GoDaddy hosting / Imgur / wherever and paste a URL. Saves us
+  wiring Supabase Storage + CORS + a file-upload widget for v1.
+  Add when Daryl actually has photos he wants to manage.
+- **`revalidateTag` now requires a second arg in Next 16.** The
+  deprecation warning surfaced when type-checking; pass `'max'`
+  as the second arg or migrate to `updateTag`. Worth a mental
+  flag for any other revalidate calls we add later.
+- **Voice over correctness.** Seeded copy intentionally says
+  things like "for years" rather than a specific decade, and
+  refers to "Daryl Brenk" / "our family". Daryl can refine the
+  specifics once he proofs it — the goal of v1 copy is to give
+  the storefront a face that isn't `Lorem ipsum`.
+
+### Up Next
+
+The two clean next moves remain unchanged:
+
+1. **Production cutover.** New Supabase project on your side,
+   `alembic upgrade head`, seed scripts (including the new
+   storefront seed), deploy backend to Fly.io, deploy frontend
+   to Vercel, DNS for both `brenkfacilityservices.com` (apex →
+   Vercel) and `app.brenkfacilityservices.com` (CNAME → Vercel).
+2. **Phase 1.5 invoice push to SC.** Spec fully documented;
+   actual build can start any time. Webhook receiver buildable
+   in dev against fixtures; registration needs the production
+   public URL.
+
+Either order works. Storefront can be live + Daryl can be
+editing copy while we wait on the SC permissions sort-out.
+
+### Deferred / known v1.1
+
+- Image upload to Supabase Storage (currently URL-only inputs).
+- Storefront preview link in the editor opens
+  `localhost:3000/marketing` even after deploy — should detect
+  prod and open the real bare-domain URL.
+- The "Reports" sidebar entry is still a placeholder. Whenever
+  we get to Phase 4 analytics, the storefront's `default_markup`
+  + invoice paid history becomes a real spend-tracking surface.
+
+---
+
 ## Session: May 25, 2026 — ~5 hours
 
 Built the Invoice Queue — Sue's-clipboard replacement. Four-tab page,

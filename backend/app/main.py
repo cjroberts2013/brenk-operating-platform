@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from app import __version__
-from app.api.v1 import api_router
+from app.api.v1 import api_router, public_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -63,6 +63,10 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router, prefix="/api/v1")
+    # Public router mounted at the same /api/v1 prefix but without
+    # the JWT-auth dependency chain. Keep this list narrow — most
+    # endpoints should require auth.
+    app.include_router(public_router, prefix="/api/v1")
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:

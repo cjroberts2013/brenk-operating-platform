@@ -2,21 +2,59 @@
  * Auth proxy (Next.js 16 — `proxy.ts` replaces the deprecated
  * `middleware.ts` file convention; same shape, same runtime, new name).
  *
- * Runs on every non-static request. Two responsibilities:
+ * Three responsibilities:
  *   1. Refresh the Supabase session cookie if the access token is near
  *      expiry. Required for SSR — without this, server components see
  *      a stale `user` after the token would have refreshed in the
  *      browser.
- *   2. Redirect unauthenticated requests to /login (except for /login
- *      itself and the /auth/* callback routes).
+ *   2. Redirect unauthenticated requests to /login (except for /login,
+ *      /auth/*, /marketing/*, and bare-domain requests — see below).
+ *   3. Rewrite bare-domain requests (brenkfacilityservices.com) to the
+ *      /marketing route group. The dashboard lives at
+ *      app.brenkfacilityservices.com; the bare domain serves the
+ *      public marketing site sourced from the same Next.js project.
  */
 
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-const PUBLIC_PATH_PREFIXES = ['/login', '/auth']
+/** Paths that anyone can hit without a Supabase session. */
+const PUBLIC_PATH_PREFIXES = ['/login', '/auth', '/marketing']
+
+/** True when the request host should serve the public marketing
+ *  storefront instead of the dashboard. The dashboard lives at
+ *  `app.<domain>`; everything else (bare apex, www, etc.) is the
+ *  storefront.
+ *
+ *  In local dev (`localhost` / `127.0.0.1`) we serve the dashboard
+ *  so the editor + sign-in flow keep working. Preview the storefront
+ *  at `localhost:3000/marketing` while dev'ing.
+ */
+function isStorefrontHost(host: string): boolean {
+  const justHost = host.split(':')[0]
+  if (justHost === 'localhost' || justHost === '127.0.0.1') return false
+  if (justHost.startsWith('app.')) return false
+  return true
+}
 
 export async function proxy(request: NextRequest) {
+  const path = request.nextUrl.pathname
+  const host = request.headers.get('host') ?? ''
+
+  // 1. Bare-domain rewrite. If we're on a storefront host and the
+  //    path doesn't already start with /marketing, /api, or /_next,
+  //    rewrite it under /marketing so Next serves the public pages.
+  if (
+    isStorefrontHost(host) &&
+    !path.startsWith('/marketing') &&
+    !path.startsWith('/api') &&
+    !path.startsWith('/_next')
+  ) {
+    const rewriteUrl = request.nextUrl.clone()
+    rewriteUrl.pathname = `/marketing${path === '/' ? '' : path}`
+    return NextResponse.rewrite(rewriteUrl)
+  }
+
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -46,7 +84,6 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const path = request.nextUrl.pathname
   const isPublic = PUBLIC_PATH_PREFIXES.some(
     (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   )

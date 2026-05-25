@@ -141,9 +141,19 @@ stays public and the dashboard stays locked.
   "Stuck right now" panel. Tiles link into the WO list via a
   single `?stage=…` param that runs the exact same composite
   filter the dashboard uses for counting — guaranteed to match.
+- Invoice queue at `/invoices` with four tabs (Ready to mark up /
+  Marked up / Sent / Paid). Markup helper card on each WO detail
+  page captures labor + material cost separately, applies a markup
+  %, warns if total bill > NTE. Brenk-confidential fields never
+  pushed to SC.
+- Public marketing storefront at the bare domain
+  (`brenkfacilityservices.com` once deployed) sourced from the
+  same Next.js project via hostname-based rewrite in `proxy.ts`.
+  Dashboard editor at `/storefront` lets Daryl edit hero, about,
+  services, service area, contact, and footer. Singleton content
+  row + ordered services list in the backend.
 
 **Not yet done:**
-- Invoice queue page (replaces Sue's clipboard)
 - Markup helper / Settings page (Daryl's markup-board rules)
 - Junction table for multi-vendor-per-WO (current model is single
   `assigned_vendor_id`; deferred until pipeline funnel surfaces the need)

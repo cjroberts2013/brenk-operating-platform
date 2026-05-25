@@ -364,3 +364,58 @@ export type DashboardPipeline = {
   total_open: number
   total_invoiced: number
 }
+
+// =============================================================================
+// Storefront (Phase 5 — public marketing site + editor)
+// =============================================================================
+
+export type StorefrontServiceItem = {
+  /** Set on read; ignored on write (server assigns new ids on
+   *  every replace). */
+  id?: number | null
+  sort_order: number
+  title: string
+  description: string | null
+  /** Heroicon outline name — the renderer maps this to the actual
+   *  icon component. e.g. 'wrench-screwdriver', 'bolt'. */
+  icon: string | null
+}
+
+export type Storefront = {
+  id: number
+
+  hero_title: string | null
+  hero_subtitle: string | null
+  hero_cta_text: string | null
+  hero_cta_link: string | null
+  hero_image_url: string | null
+
+  about_heading: string | null
+  about_body: string | null
+  about_image_url: string | null
+
+  service_area_heading: string | null
+  service_area_body: string | null
+
+  contact_email: string | null
+  contact_phone: string | null
+  contact_address: string | null
+  contact_hours: string | null
+
+  footer_tagline: string | null
+  footer_copyright: string | null
+
+  logo_url: string | null
+
+  services: StorefrontServiceItem[]
+
+  created_at: string
+  updated_at: string
+}
+
+/** PATCH body — every field optional. Omit to leave alone; pass
+ *  null to clear. */
+export type StorefrontUpdate = Partial<
+  Omit<Storefront, 'id' | 'services' | 'created_at' | 'updated_at'>
+>
+

@@ -7,11 +7,21 @@ deployment health probes.
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.endpoints import dashboard, trades, vendors, work_orders
+from app.api.v1.endpoints import dashboard, storefront, trades, vendors, work_orders
 from app.core.auth import get_current_user
 
+# Authenticated routes — every request needs a valid Supabase JWT.
 api_router = APIRouter(dependencies=[Depends(get_current_user)])
 api_router.include_router(work_orders.router, prefix="/work-orders", tags=["work-orders"])
 api_router.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
 api_router.include_router(trades.router, prefix="/trades", tags=["trades"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(storefront.admin_router, prefix="/storefront", tags=["storefront-admin"])
+
+# Public routes — no auth dep. Mounted separately by `main.py` so
+# the dependency chain on `api_router` doesn't apply. Keep this
+# list very short; everything else should require auth.
+public_router = APIRouter()
+public_router.include_router(
+    storefront.public_router, prefix="/storefront", tags=["storefront-public"]
+)
