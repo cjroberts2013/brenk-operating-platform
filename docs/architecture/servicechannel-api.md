@@ -444,19 +444,61 @@ Open question for when we see real data: what `Status` strings does
 SC actually use? The schema example is just `"string"` — real values
 TBD on first successful read.
 
-### Auto-sync architecture
+### Auto-sync architecture — webhook-driven (revised 2026-05-25)
 
-When `/v3/odata/invoices` is reachable:
+Original plan was hourly polling of `/v3/odata/invoices`. Then
+Charles found SC's **Integration → WebHooks** admin page, which
+explicitly says: *"Webhooks allow you to receive notifications
+from ServiceChannel regarding Work Orders, Invoices, Proposals
+and more."*
 
-1. New Procrastinate periodic task `sync_invoices` (hourly, like WOs).
-2. Query: `GET /v3/odata/invoices?$filter=UpdatedDate gt {max(work_orders.sc_invoice_updated_at)}` — incremental, only changed records.
-3. For each invoice, look up the WO by `WoTrackingNumber == sc_work_order_id` (or fall back to matching `Number == sc_invoice_number`).
-4. Update the WO's tracking columns + derive `brenk_paid_at` from `PaidDate` when `Status == "Paid"`.
-5. On `Status == "Rejected"`, surface the reason on the WO detail; UI gives a "Resubmit" button that reuses the same payload-builder.
+Webhooks beat polling here on every axis: real-time vs hourly,
+zero load on SC's OData (which is blocked anyway), and SC handles
+retries on receiver failure as standard. They also probably
+sidestep the OData 401 entirely — webhooks are a separate
+permission path.
 
-Once this is wired the manual "Mark paid" button can become a
-fallback only (for the rare case where Brenk records a payment
-outside SC).
+**Revised plan:**
+
+1. New endpoint `POST /api/v1/webhooks/sc/invoices` (no auth dep —
+   webhook signature verifies authenticity instead of JWT).
+2. Signature verification middleware (HMAC / bearer / IP allowlist
+   — exact mechanism TBD pending the SC webhook docs).
+3. Per-event handlers. Likely event types (confirm from SC docs):
+   - `InvoiceCreated` / similar → update `sc_invoice_id`,
+     `sc_invoice_status = "Open"`.
+   - `InvoiceApproved` → set `sc_invoice_status = "Approved"`.
+   - `InvoicePaid` → set `brenk_paid_at` to the event's paid date.
+   - `InvoiceRejected` → set `sc_invoice_last_error` to the
+     rejection reason; UI surfaces a "Resubmit" button.
+4. Reconciliation: find the local WO by either
+   `WoTrackingNumber == sc_work_order_id` or
+   `Number == sc_invoice_number`.
+
+Hourly polling stays in the docs as a fallback path in case the
+webhook proves unreachable or unreliable in practice.
+
+**Practical note on testing webhooks in dev:**
+
+Webhooks need a public HTTPS URL. Local dev on `localhost:8000`
+can't receive them. Two options:
+
+- **Defer webhook end-to-end testing until production deploy**
+  (Fly.io URL is public over HTTPS).
+- **Use an ngrok / Cloudflare tunnel** for dev-time receiver
+  testing.
+
+We can still implement the receiver endpoint + handlers in dev
+without real webhook deliveries — unit-test against fixtures
+that mirror SC's payload shape.
+
+### Once-and-for-all: known IDs from the SC web UI
+
+- Brenk's ProviderId: **`2000091087`** (shown in the footer of
+  Brenk's SC admin pages). This is the `VendorId` field on the
+  `POST /v3/invoices` payload (was an open question earlier).
+- CubeSmart's SubscriberId: **`2014917186`** (from our `clients`
+  table).
 
 ### Implementation plan
 
