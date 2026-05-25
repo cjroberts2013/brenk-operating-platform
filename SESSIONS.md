@@ -8,6 +8,136 @@ Format: most recent at the top.
 
 ---
 
+## Session: May 21, 2026 (part 2) — ~2.5 hours
+
+Built v1 of the Dashboard pipeline funnel — Daryl's at-a-glance read
+on where the business stands today.
+
+### Accomplishments
+
+**Backend: pipeline stage logic + endpoint.**
+- New `backend/app/services/pipeline.py` is the single source of
+  truth for what defines each lifecycle stage. Holds the `StAGES`
+  tuple (key, label, color, icon, stuck-threshold), a Python
+  `classify()` for the dashboard's count-and-classify pass, and a
+  matching `stage_filter_clauses()` returning the SQLAlchemy WHERE
+  clauses for the WO list endpoint. Both must stay in sync so a
+  tile's count equals the list page's row count for any stage.
+- New `GET /api/v1/dashboard/pipeline` (in
+  `backend/app/api/v1/endpoints/dashboard.py`) returns the full
+  payload: per-stage counts + avg age + stuck count, the top 20
+  most-overdue WOs ("Stuck right now" panel), and the top-line
+  open vs invoiced split. Loads every WO with refs eagerly, then
+  classifies + aggregates in Python — at ~341 rows total this is
+  trivially fast and keeps the stage logic in one place.
+
+**Backend: `?stage=` query param on the WO list endpoint.**
+- `GET /api/v1/work-orders/?stage=<key>` applies the same composite
+  filter the dashboard uses for counting. Verified end-to-end:
+  every tile's count agrees byte-for-byte with the list page's
+  `total` for that stage (9 / 46 / 12 / 23 / 229).
+- Unknown stage key returns a clean 422 with the list of valid
+  keys — better than silently falling through to "all WOs".
+
+**Frontend: Dashboard home page (`/`).**
+- Replaced the placeholder with header (open + invoiced counts),
+  row of five pipeline tiles (mobile 2-up, md 3-up, xl 5-up), and
+  a "Stuck right now" panel underneath. Tiles use SC's color
+  language and link directly to the WO list pre-filtered by stage.
+- `PipelineStageTile` renders a colored accent bar, optional icon
+  (user / money / check), big count, avg-age line, and a red
+  "X stuck" callout when stuck_count > 0 (or quiet "on track").
+- `StuckPanel` renders the top-20 most-overdue WOs as a tight
+  table — status badge, WO#, stage, location, trade, vendor (or
+  "Unassigned" in red), how-overdue, last-SC-update.
+
+**Stage-filter chip on the WO list page.**
+- When you land via a tile click, an `Active filter: Stage:
+  <label> ×` chip appears below the header. One click clears the
+  stage filter and drops the page back to the full list (preserving
+  any unrelated `q=` or `status=` params already in the URL, but
+  resetting pagination since the result set just got bigger).
+
+**Merged Dispatched + Vendor-assigned tiles.**
+- Original plan had them as separate stages, but in Daryl's actual
+  workflow accepting an SC dispatch and texting the sub-vendor
+  happen in the same sitting — splitting them created a "stage"
+  he never operationally occupies. Now one "Dispatched" tile with
+  the 👤 icon as a quiet reminder that vendor assignment lives
+  inside this stage. When Twilio lands in Phase 3 ("vendor
+  notified" becomes a meaningful timestamp distinct from "vendor
+  assigned"), we re-introduce the split.
+- The `classify()` function still accepts a `has_vendor` argument
+  for forward-compat, but ignores it for now. Inline comment +
+  module docstring document the merger so the rationale isn't
+  lost.
+
+### Decisions & Observations
+
+- **Single source of truth for stage definitions** — Python
+  `classify()` for the dashboard count pass, `stage_filter_clauses()`
+  for the WO list SQL filter. Both live in
+  `app/services/pipeline.py`, both consult the same `STAGES`
+  tuple, both **must stay in sync**. The module docstring flags
+  this. The smoke test (dashboard count == list page total for
+  every stage) catches drift in one shot.
+- **`?stage=…` over `?extended=…`+`?has_vendor=…`.** Considered
+  exposing the raw SC fields as separate filter params, but that
+  would put the stage-composition knowledge in the frontend AND
+  the backend. One stage param is cleaner: the dashboard
+  generates the URL, the list endpoint runs the filter, the
+  definition lives once.
+- **Cancelled / no-charge WOs are excluded from the pipeline.**
+  22 of them in the dataset. They're terminal — Daryl doesn't
+  need to act on them — so they don't appear on a tile or get
+  counted in `total_open` or `total_invoiced`. Visible in the WO
+  list directly if Daryl ever wants to find one.
+- **"Age in stage" uses `sc_updated_date` as a proxy.** Not
+  perfect (Brenk-side actions in our app don't bump it), but
+  cheap and good enough for v1. When we add Brenk-internal stage
+  flags (vendor_notified, ready_to_invoice, markup_decided) with
+  their own timestamps, we'll switch the age computation to the
+  per-stage timestamp.
+- **Stuck thresholds are hard-coded per stage** (1 / 3 / 7 / 3
+  days; invoiced has none). One-line tweaks in pipeline.py if
+  Daryl tells us "1 day is too aggressive for pending acceptance,
+  give me 3." Configurable-from-Settings is overkill for v1.
+- **The sandbox dataset is old.** Most WOs haven't been touched
+  in 50+ days, so nearly everything reads as "stuck" in the
+  current view. That's expected — once we're on fresh prod data,
+  the stuck count will be a much smaller, actionable number.
+
+### Up Next
+
+The dashboard funnel was the first of the "two pages that directly
+attack Daryl's failure modes." Next chunk is the **Invoice queue**
+— Sue's-clipboard replacement.
+
+Per the markup design captured earlier today:
+
+1. Migration to add `default_markup_percent` to `trades` and
+   `brenk_markup_percent` + `brenk_marked_up_at` (+ optionally
+   `brenk_paid_at`) to `work_orders`. Cheap nullable columns.
+2. PATCH endpoints to set the markup % on a WO + the default %
+   on a trade.
+3. New `/invoices` page with the four tabs Sue actually thinks in
+   ("Ready to mark up" / "Marked up, ready to send" / "Sent" /
+   "Paid"). Tab content is just a filtered WO list with the
+   markup helper inline.
+4. Settings page gets a markup-defaults table.
+
+Then in following sessions: SC employee→WO research, the
+multi-vendor junction table when the funnel surfaces a need,
+production cutover.
+
+### Cleanup notes
+
+- A spawned follow-up task ("Add ?extended= filter to WO list
+  page") is now obsolete — the cleaner `?stage=` approach
+  supersedes it. Dismiss the chip in the UI.
+
+---
+
 ## Session: May 21, 2026 — ~30 min (docs only)
 
 Short docs-only checkpoint. Resolved two open questions and captured

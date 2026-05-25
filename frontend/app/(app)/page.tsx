@@ -1,4 +1,10 @@
-export default function DashboardPage() {
+import { PipelineStageTile } from '@/components/dashboard/PipelineStageTile'
+import { StuckPanel } from '@/components/dashboard/StuckPanel'
+import { getDashboardPipeline } from '@/lib/api/dashboard'
+
+export default async function DashboardPage() {
+  const data = await getDashboardPipeline()
+
   return (
     <div className="space-y-6">
       <header>
@@ -6,15 +12,25 @@ export default function DashboardPage() {
           Dashboard
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Needs-attention and today&apos;s schedule will live here.
+          {data.total_open} work order{data.total_open === 1 ? '' : 's'} in the
+          pipeline · {data.total_invoiced} invoiced to date
         </p>
       </header>
-      <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center dark:border-white/10">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Placeholder. The home view is built later — see the Dashboard Plan
-          in CLAUDE.md.
-        </p>
-      </div>
+
+      {/* Pipeline funnel: SC's color language left to right.
+          Mobile: 2-up, md: 3-up, xl: full row of 6. */}
+      <section>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {data.stages.map((stage) => (
+            <PipelineStageTile key={stage.key} stage={stage} />
+          ))}
+        </div>
+      </section>
+
+      {/* Stuck right now — the operational reason this page exists. */}
+      <section>
+        <StuckPanel items={data.stuck} />
+      </section>
     </div>
   )
 }

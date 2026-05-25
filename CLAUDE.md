@@ -136,9 +136,13 @@ stays public and the dashboard stays locked.
 - Contextual top-bar search: filters the current list page as you
   type (debounced URL `?q=` push, race-condition-safe). Active on
   `/work-orders` and `/vendors`, hidden on other paths.
+- Dashboard pipeline funnel home page: five tiles (pending /
+  dispatched / work complete / ready to invoice / invoiced) +
+  "Stuck right now" panel. Tiles link into the WO list via a
+  single `?stage=…` param that runs the exact same composite
+  filter the dashboard uses for counting — guaranteed to match.
 
 **Not yet done:**
-- Dashboard pipeline-funnel home page (currently placeholder)
 - Invoice queue page (replaces Sue's clipboard)
 - Markup helper / Settings page (Daryl's markup-board rules)
 - Junction table for multi-vendor-per-WO (current model is single

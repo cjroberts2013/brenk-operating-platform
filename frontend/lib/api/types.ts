@@ -120,6 +120,27 @@ export type WorkOrderNoteRef = {
   source: string
 }
 
+/** Pipeline-funnel stage keys. Mirrors the backend's
+ *  `app/services/pipeline.py` STAGES tuple. Tile clicks from the
+ *  dashboard land on the WO list page with `?stage=…`. */
+export type PipelineStageKey =
+  | 'pending_acceptance'
+  | 'dispatched'
+  | 'work_complete'
+  | 'ready_to_invoice'
+  | 'invoiced'
+
+/** Human-readable labels for each stage key, used by the filter chip
+ *  on the WO list page. Kept in sync with the labels the dashboard
+ *  endpoint emits — same text in both places. */
+export const STAGE_LABELS: Record<PipelineStageKey, string> = {
+  pending_acceptance: 'Pending acceptance',
+  dispatched: 'Dispatched',
+  work_complete: 'Work complete · awaiting store',
+  ready_to_invoice: 'Ready to invoice',
+  invoiced: 'Invoiced',
+}
+
 /** Query params accepted by `GET /api/v1/work-orders/`. */
 export type WorkOrderListParams = {
   status?: string
@@ -128,6 +149,7 @@ export type WorkOrderListParams = {
   assigned_vendor_id?: number
   updated_since?: string // ISO 8601
   q?: string
+  stage?: PipelineStageKey
   page?: number
   page_size?: number
 }
@@ -227,4 +249,54 @@ export type VendorUpdate = Partial<VendorCreate>
 /** Shape of the body for PATCH /api/v1/work-orders/{id}. */
 export type WorkOrderUpdate = {
   assigned_vendor_id?: number | null
+}
+
+// =============================================================================
+// Dashboard
+// =============================================================================
+
+export type PipelineStageColor =
+  | 'pink'
+  | 'yellow'
+  | 'orange'
+  | 'green'
+  | 'emerald'
+  | 'gray'
+
+export type PipelineStageIcon = 'user' | 'chat' | 'money' | 'check' | null
+
+export type PipelineStage = {
+  key: string
+  label: string
+  color: PipelineStageColor
+  icon: PipelineStageIcon
+  count: number
+  avg_age_days: number | null
+  stuck_count: number
+  stuck_threshold_days: number | null
+}
+
+export type StuckWorkOrder = {
+  id: number
+  sc_work_order_id: number
+  sc_number: string
+  primary_status: string
+  extended_status: string | null
+  stage_key: string
+  stage_label: string
+  age_days: number
+  overdue_by_days: number
+  trade: TradeRef | null
+  location: LocationRef | null
+  assigned_vendor: VendorRef | null
+  nte: string | null
+  scheduled_date: string | null
+  sc_updated_date: string | null
+}
+
+export type DashboardPipeline = {
+  stages: PipelineStage[]
+  stuck: StuckWorkOrder[]
+  total_open: number
+  total_invoiced: number
 }

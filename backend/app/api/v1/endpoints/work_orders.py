@@ -23,6 +23,7 @@ from app.schemas.work_order import (
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
+from app.services.pipeline import STAGE_BY_KEY, stage_filter_clauses
 from app.services.sync.work_orders import sync_all_work_orders
 
 
@@ -90,6 +91,17 @@ async def list_work_orders(
             ),
         ),
     ] = None,
+    stage: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Pipeline-funnel stage key (pending_acceptance, dispatched, "
+                "work_complete, ready_to_invoice, invoiced). Applies the same "
+                "composite filter the dashboard uses for counting — so a tile's "
+                "count equals the list page's row count for that stage."
+            ),
+        ),
+    ] = None,
     page: Annotated[int, Query(ge=1, description="1-indexed page number")] = 1,
     page_size: Annotated[
         int,
@@ -113,6 +125,15 @@ async def list_work_orders(
         filters.append(WorkOrder.assigned_vendor_id == assigned_vendor_id)
     if updated_since is not None:
         filters.append(WorkOrder.sc_updated_date >= updated_since)
+    if stage is not None:
+        # Unknown stage keys fall through to a `false()` clause that
+        # matches nothing — better than silently returning everything.
+        if stage not in STAGE_BY_KEY:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(f"unknown stage {stage!r}; must be one of: {', '.join(STAGE_BY_KEY)}"),
+            )
+        filters.extend(stage_filter_clauses(stage))
 
     # Free-text search. We OR across columns the operator is likely to
     # type — WO number, SC purchase number, problem code, caller free

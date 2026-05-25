@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { XMarkIcon } from '@heroicons/react/20/solid'
 
 import { Pagination } from '@/components/work-orders/Pagination'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
@@ -8,9 +9,22 @@ import {
   getWorkOrderSyncStatus,
   listWorkOrders,
 } from '@/lib/api/work-orders'
+import { STAGE_LABELS, type PipelineStageKey } from '@/lib/api/types'
 import { money, relativeTime, shortDate } from '@/lib/format'
 
 const DEFAULT_PAGE_SIZE = 50
+
+const STAGE_KEYS = Object.keys(STAGE_LABELS) as PipelineStageKey[]
+
+function parseStage(
+  value: string | string[] | undefined,
+): PipelineStageKey | undefined {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (!raw) return undefined
+  return (STAGE_KEYS as string[]).includes(raw)
+    ? (raw as PipelineStageKey)
+    : undefined
+}
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -39,6 +53,7 @@ export default async function WorkOrdersPage({
   const page_size = parsePositiveInt(sp.page_size, DEFAULT_PAGE_SIZE)
   const status = stringParam(sp.status)
   const q = stringParam(sp.q)
+  const stage = parseStage(sp.stage)
 
   // Fire list + sync-status in parallel; both are cheap and they're
   // independent of each other.
@@ -48,9 +63,21 @@ export default async function WorkOrdersPage({
       page_size,
       ...(status ? { status } : {}),
       ...(q ? { q } : {}),
+      ...(stage ? { stage } : {}),
     }),
     getWorkOrderSyncStatus(),
   ])
+
+  // Build the URL the "× clear stage" link sends us to — same params
+  // as today minus the stage key (and page, since dropping a filter
+  // typically expands the result set and pagination becomes stale).
+  const clearStageHref = (() => {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (q) params.set('q', q)
+    const qs = params.toString()
+    return qs ? `/work-orders?${qs}` : '/work-orders'
+  })()
 
   return (
     <div className="space-y-6">
@@ -61,6 +88,12 @@ export default async function WorkOrdersPage({
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {data.total.toLocaleString()} total
+            {stage ? (
+              <>
+                {' '}
+                · in stage <strong>{STAGE_LABELS[stage]}</strong>
+              </>
+            ) : null}
             {status ? <> · filtered to <strong>{status}</strong></> : null}
             {q ? <> · matching <strong>“{q}”</strong></> : null} ·
             newest first
@@ -69,11 +102,27 @@ export default async function WorkOrdersPage({
         <StatusFilter current={status} />
       </header>
 
+      {stage ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Active filter:
+          </span>
+          <Link
+            href={clearStageHref}
+            title="Clear stage filter"
+            className="group inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800"
+          >
+            Stage: {STAGE_LABELS[stage]}
+            <XMarkIcon className="size-3 text-indigo-400 transition group-hover:text-indigo-700 dark:text-indigo-500 dark:group-hover:text-indigo-300" />
+          </Link>
+        </div>
+      ) : null}
+
       <SyncWorkOrdersButton lastSyncedAt={syncStatus.last_synced_at} />
 
       <div className="overflow-hidden rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
         {data.items.length === 0 ? (
-          <EmptyState hasFilter={Boolean(status || q)} />
+          <EmptyState hasFilter={Boolean(status || q || stage)} />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-white/10">
