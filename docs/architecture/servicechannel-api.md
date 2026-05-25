@@ -545,6 +545,36 @@ Created via `POST /v3/NotificationWebHooks` or via the SC web UI's
 **Integration → WebHooks** page. UI is simpler for a one-time
 setup; API is for self-service / programmatic re-config.
 
+#### UI form fields (Integration → WebHooks → Add Webhook)
+
+The web UI for creating a webhook exposes everything we need
+without touching the API:
+
+- **Signing Key** (at top of page): Show / Copy / Regenerate
+  buttons. Self-service — we don't have to call `GET
+  /v3/NotificationSubscriptions/SigningKey` programmatically.
+  Copy this into `backend/.env` as `SC_WEBHOOK_SIGNING_KEY`
+  once we're ready to build the receiver.
+- **Name + Description + URL**: the basics.
+- **Status**: Active / Inactive radio. New webhooks default to
+  Inactive — switch to Active once Ping URL succeeds.
+- **Ping URL button**: test connectivity before saving. Use this
+  post-deploy to confirm SC can reach our endpoint without
+  committing to a subscription yet. Eliminates "is the webhook
+  even firing?" guesswork.
+- **Add Subscription**: per-subscription form with Object Type
+  dropdown (Work Order, Check In/Out, **Invoice**, Proposal,
+  Private Network Invitation, ServiceProvider/Contract,
+  Checklist), Name, and two filter buttons:
+  - **Add / Remove Categories** → `Rules.Categories` in the API
+  - **Add / Remove Statuses** → likely subscribe-on-specific-
+    status (so we can narrow Invoice subs to status transitions
+    we actually care about — confirm shape when we configure)
+
+No permission/role gate visible on the Object Type dropdown,
+including Invoice. Reassuring evidence that Brenk's account
+can in fact subscribe to invoice events from the UI.
+
 Example registration body:
 ```json
 {
