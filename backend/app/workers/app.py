@@ -4,10 +4,17 @@ Procrastinate uses our Postgres database as the job queue backend, so no
 separate Redis or RabbitMQ infrastructure is needed.
 
 Run the worker:
-    procrastinate --app=app.workers.app worker
+    procrastinate --app=app.workers.app.procrastinate_app worker
 
 Apply Procrastinate's own schema (one-time):
-    procrastinate --app=app.workers.app schema --apply
+    procrastinate --app=app.workers.app.procrastinate_app schema --apply
+
+The `.procrastinate_app` suffix is required — procrastinate 3.x's
+`--app` argument is a fully-dotted Python path including the
+variable name. The gunicorn-style `module:variable` colon syntax
+does NOT work here. So `app.workers.app.procrastinate_app` walks:
+  1. Import `app.workers.app` module
+  2. Get `procrastinate_app` attribute from it
 """
 
 from procrastinate import PsycopgConnector

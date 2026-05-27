@@ -1,19 +1,50 @@
 # Fly.io configuration for the Procrastinate worker.
-# Apply with: fly deploy --config fly.worker.toml
+# Apply with: fly deploy --config fly.worker.toml --remote-only
+#
+# Same Dockerfile as fly.web.toml — only the runtime command differs.
+# We override via the `processes` table, and Fly runs that command
+# instead of the Dockerfile CMD. No public network ports (Procrastinate
+# polls the Postgres jobs table directly).
 
 app = "brenk-platform-worker"
-primary_region = "ord"
+primary_region = "dfw"
 
 [build]
   dockerfile = "Dockerfile"
 
+# No release_command here — migrations are owned by the web app's
+# release phase. Worker just starts polling once it boots.
+
 [env]
   APP_ENV = "production"
+  # Force /app onto sys.path so any subprocess (procrastinate CLI
+  # in particular) can import the `app` package regardless of cwd.
+  # The editable install (`pip install -e .`) registers an
+  # importlib finder, but on PEP 660 + flat-layout it doesn't
+  # always pick up nested subpackages (`app.workers`). PYTHONPATH
+  # sidesteps the issue. Long-term: add explicit
+  # [tool.setuptools.packages.find] to pyproject.toml.
+  PYTHONPATH = "/app"
 
+# Single process group named `worker`. Fly's `processes` table takes
+# the form `name = "command"`; the worker app's launchpad does the
+# same thing the web app does, but starts procrastinate instead of
+# uvicorn.
 [processes]
-  worker = "procrastinate --app=app.workers.app worker --queues=default"
+  # Procrastinate 3.x parses --app as a fully-dotted Python path
+  # (module + attribute, all dots). The colon syntax used by other
+  # frameworks (gunicorn-style `module:variable`) does NOT work
+  # here. So `app.workers.app.procrastinate_app` walks:
+  #   1. Import `app.workers.app` module
+  #   2. Get `procrastinate_app` attribute from it
+  worker = "procrastinate --app=app.workers.app.procrastinate_app worker --queues=default"
 
+# Workers don't need to be HTTP-reachable, but they DO need to be
+# running 1 machine at all times so the hourly periodic tasks fire.
+# `auto_stop_machines` defaults to false in the absence of a service
+# block, so we just declare the vm.
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
   memory_mb = 512
+  processes = ["worker"]

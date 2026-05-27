@@ -766,6 +766,28 @@ branching feature requires the Pro plan, which we're not on.)
   `brenk_markup_percent` to SC. They're Brenk-internal margin data.
   The only number that ever goes to SC is the final total Daryl
   manually enters into SC's own invoice form.
+- Don't forget `procrastinate schema --apply` when standing up a
+  fresh database. Our `alembic upgrade head` migrations cover our
+  schema, but Procrastinate maintains its OWN tables + 18 stored
+  procedures (`procrastinate_jobs`, `procrastinate_workers`,
+  `procrastinate_prune_stalled_workers_v1`, etc.) installed via
+  its CLI: `procrastinate --app=app.workers.app.procrastinate_app
+  schema --apply`. The worker process crashes with `function
+  procrastinate_prune_stalled_workers_v1(double precision) does
+  not exist` if you skip it. Worth running once on any fresh
+  Supabase project before the worker boots.
+- Don't expect procrastinate's `--app` flag to take a colon-
+  separated `module:variable` path. It's all dots:
+  `app.workers.app.procrastinate_app`. Different from gunicorn /
+  uvicorn / most other Python CLIs.
+- Don't rely on `pip install -e .` putting `/app` (or the project
+  root) on `sys.path` for ALL subprocesses. The PEP 660 editable
+  install registers an importlib finder that works for the
+  top-level package but doesn't always cover nested sub-packages
+  when a separate CLI binary is invoked. Belt-and-suspenders: set
+  `PYTHONPATH=/app` (or equivalent) in the runtime env. Our Fly
+  configs do this; if you add a third app or change the Dockerfile
+  WORKDIR, keep the PYTHONPATH match.
 
 ## Communication With Charles
 

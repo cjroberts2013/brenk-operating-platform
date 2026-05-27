@@ -1,19 +1,41 @@
 # Fly.io configuration for the FastAPI web service.
-# Apply with: fly deploy --config fly.web.toml
+# Apply with: fly deploy --config fly.web.toml --remote-only
+#
+# Brenk's centered in Buda, TX — Dallas (`dfw`) is the closest Fly
+# region. Switched from the original `ord` (Chicago) which was set
+# back when we were less sure of the target geo.
 
 app = "brenk-platform-web"
-primary_region = "ord"  # Chicago — closest to Detroit; adjust as needed
+primary_region = "dfw"
 
 [build]
   dockerfile = "Dockerfile"
 
+# Run schema migrations automatically on every deploy. Idempotent —
+# if prod is already at head, alembic is a no-op. Skips the "I
+# forgot to migrate" failure mode entirely.
+[deploy]
+  release_command = "alembic upgrade head"
+
 [env]
   APP_ENV = "production"
   PORT = "8080"
+  # Force /app onto sys.path so any subprocess (alembic in the
+  # release_command, uvicorn at startup, etc.) can import the
+  # `app` package regardless of cwd. See fly.worker.toml for the
+  # rationale — same issue, same fix, kept symmetric.
+  PYTHONPATH = "/app"
+  # Most env vars come in as Fly secrets, set via `fly secrets set`
+  # — see the deploy runbook. This [env] block is only for non-
+  # sensitive defaults that we don't mind committing.
 
 [http_service]
   internal_port = 8080
   force_https = true
+  # Brenk's traffic is low + predictable (Daryl + one or two team
+  # members) but the dashboard expects to be live the moment Daryl
+  # opens it. Keep one machine warm at all times — cold starts on
+  # an empty cache would feel sluggish.
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
@@ -24,6 +46,8 @@ primary_region = "ord"  # Chicago — closest to Detroit; adjust as needed
     hard_limit = 50
     soft_limit = 25
 
+# Fly health-probes /health. The endpoint is defined in app/main.py
+# and is intentionally unauthenticated.
 [[http_service.checks]]
   interval = "30s"
   timeout = "5s"
