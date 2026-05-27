@@ -6,11 +6,21 @@ the counts + avg age the dashboard needs.
 
 The stage ladder, in order:
 
-  pending_acceptance  IN PROGRESS / WAITING FOR APPROVAL
+  pending_acceptance  OPEN        / any
+                      IN PROGRESS / WAITING FOR APPROVAL
   dispatched          IN PROGRESS / not waiting (Brenk-vendor optional)
   work_complete       COMPLETED   / PENDING CONFIRMATION
   ready_to_invoice    COMPLETED   / CONFIRMED or NOT INVOICED
   invoiced            INVOICED    / any
+
+Note on `OPEN` (added 2026-05-26): production SC has WOs in
+`primary_status = "OPEN"` with no extended status — these are
+brand-new pre-acceptance work orders. The sandbox dataset didn't
+have any, so the initial classifier missed them and they were
+invisible on the dashboard. Treating them as `pending_acceptance`
+matches Daryl's mental model: an OPEN WO is one he hasn't yet
+accepted or declined, same operational meaning as the IN PROGRESS
+/ WAITING FOR APPROVAL variant.
 
 `CANCELED` and `NO CHARGE` (both nested under COMPLETED) are terminal
 and live outside the pipeline — they don't appear as a stage.
@@ -38,7 +48,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, false, or_
+from sqlalchemy import ColumnElement, and_, false, or_
 
 from app.models.work_order import WorkOrder
 
@@ -131,6 +141,12 @@ def classify(
         # cancelled" variant -> Sue should be picking this up.
         return "ready_to_invoice"
 
+    # OPEN — brand new, pre-acceptance. SC sometimes uses this
+    # primary_status instead of IN PROGRESS / WAITING FOR APPROVAL.
+    # Either way, the operator's action is the same: accept or decline.
+    if p == "OPEN":
+        return "pending_acceptance"
+
     if p == "IN PROGRESS":
         if e == "WAITING FOR APPROVAL":
             return "pending_acceptance"
@@ -152,9 +168,17 @@ def stage_filter_clauses(stage_key: str) -> list[ColumnElement[bool]]:
     to show an empty list than to silently fall through to "all WOs".
     """
     if stage_key == "pending_acceptance":
+        # Two equivalent SC states: primary=OPEN (any extended) OR
+        # primary=IN PROGRESS + extended=WAITING FOR APPROVAL. Both
+        # mean "Daryl hasn't accepted or declined this WO yet."
         return [
-            WorkOrder.primary_status == "IN PROGRESS",
-            WorkOrder.extended_status == "WAITING FOR APPROVAL",
+            or_(
+                WorkOrder.primary_status == "OPEN",
+                and_(
+                    WorkOrder.primary_status == "IN PROGRESS",
+                    WorkOrder.extended_status == "WAITING FOR APPROVAL",
+                ),
+            ),
         ]
     if stage_key == "dispatched":
         return [
