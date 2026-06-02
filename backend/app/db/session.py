@@ -32,7 +32,7 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """Yield a synchronous DB session (for scripts and Alembic)."""
     db = SessionLocal()
     try:
@@ -41,7 +41,7 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_db() -> AsyncGenerator[AsyncSession]:
     """Yield an async DB session (for FastAPI dependencies and async workers)."""
     async with AsyncSessionLocal() as session:
         try:

@@ -86,12 +86,14 @@ async def main() -> None:
     async with AsyncSessionLocal() as session:
         # ---------- Custom (Brenk-only) trades -------------------------
         custom_trades = (
-            await session.execute(
-                select(Trade)
-                .where(Trade.sc_trade_id.is_(None))
-                .order_by(Trade.name.asc())
+            (
+                await session.execute(
+                    select(Trade).where(Trade.sc_trade_id.is_(None)).order_by(Trade.name.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         out("BEGIN;\n\n")
 
@@ -121,9 +123,7 @@ async def main() -> None:
 
         # Flag duplicate emails so the operator knows the prod-sync
         # email-fallback may not match all of them.
-        email_counts = Counter(
-            (v.email or "").lower() for v in vendors if v.email
-        )
+        email_counts = Counter((v.email or "").lower() for v in vendors if v.email)
         dupe_emails = [e for e, n in email_counts.items() if n > 1]
         if dupe_emails:
             out("-- WARNING: the following emails appear on more than one row.\n")

@@ -54,8 +54,14 @@ class TradeUpdate(BaseModel):
 async def list_trades(
     db: Annotated[AsyncSession, Depends(get_async_db)],
 ) -> list[TradeRef]:
-    """List all trades, ordered alphabetically by name."""
-    stmt = select(Trade).order_by(Trade.name.asc())
+    """List all trades, ordered case-insensitively by name.
+
+    `func.lower` keeps the order deterministic across DB collations —
+    Daryl's Title-Case custom trades and SC's ALL-CAPS catalog names
+    interleave the way a human reads them ("Appliance Repair" before
+    "ASPHALT…"), not by ASCII code point.
+    """
+    stmt = select(Trade).order_by(func.lower(Trade.name).asc())
     rows = (await db.execute(stmt)).scalars().all()
     return [TradeRef.model_validate(row) for row in rows]
 

@@ -26,15 +26,14 @@ import httpx
 # Load .env so we get SUPABASE_URL and SUPABASE_ANON_KEY without
 # needing the user to export them.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from app.core.config import get_settings  # noqa: E402
+from app.core.config import get_settings
 
 
 async def main(email: str, password: str) -> int:
     settings = get_settings()
     if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
         print(
-            "ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in "
-            "backend/.env for this script."
+            "ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in backend/.env for this script."
         )
         return 2
 

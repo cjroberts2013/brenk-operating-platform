@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def SC_LOGIN_URL(self) -> str:
+    def SC_LOGIN_URL(self) -> str:  # noqa: N802 - settings field naming, mirrors the SC_* env vars
         """Active login URL based on environment."""
         return (
             self.SC_PRODUCTION_LOGIN_URL
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def SC_API_URL(self) -> str:
+    def SC_API_URL(self) -> str:  # noqa: N802 - settings field naming, mirrors the SC_* env vars
         """Active API URL based on environment."""
         return (
             self.SC_PRODUCTION_API_URL

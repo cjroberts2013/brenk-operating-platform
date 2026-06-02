@@ -15,13 +15,13 @@ from pathlib import Path
 # Make `app` importable when running this script directly
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.config import get_settings  # noqa: E402
-from app.services.servicechannel import ServiceChannelAuth, ServiceChannelClient  # noqa: E402
+from app.core.config import get_settings
+from app.services.servicechannel import ServiceChannelAuth, ServiceChannelClient
 
 
 async def main() -> None:
     settings = get_settings()
-    print(f"\n=== ServiceChannel Auth Test ===")
+    print("\n=== ServiceChannel Auth Test ===")
     print(f"Environment: {settings.SC_ENVIRONMENT}")
     print(f"Login URL:   {settings.SC_LOGIN_URL}")
     print(f"API URL:     {settings.SC_API_URL}")

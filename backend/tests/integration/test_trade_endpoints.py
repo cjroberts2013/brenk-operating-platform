@@ -47,9 +47,7 @@ async def _delete_trade(trade_id: int) -> None:
     settings = get_settings()
     eng = create_async_engine(settings.DATABASE_URL_ASYNC, poolclass=NullPool)
     async with eng.connect() as conn:
-        await conn.execute(
-            text("DELETE FROM vendor_trades WHERE trade_id = :id"), {"id": trade_id}
-        )
+        await conn.execute(text("DELETE FROM vendor_trades WHERE trade_id = :id"), {"id": trade_id})
         await conn.execute(text("DELETE FROM trades WHERE id = :id"), {"id": trade_id})
         await conn.commit()
     await eng.dispose()
@@ -62,13 +60,13 @@ async def test_list_trades_returns_alphabetical(client: httpx.AsyncClient) -> No
     assert isinstance(items, list)
     if len(items) > 1:
         names = [t["name"] for t in items]
-        assert names == sorted(names)
+        # Case-insensitive: the endpoint orders by lower(name) so mixed-case
+        # trade labels read alphabetically, not by ASCII code point.
+        assert names == sorted(names, key=str.lower)
 
 
 async def test_create_trade(client: httpx.AsyncClient) -> None:
-    response = await client.post(
-        "/api/v1/trades/", json={"name": "Solar Panels"}
-    )
+    response = await client.post("/api/v1/trades/", json={"name": "Solar Panels"})
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["name"] == "Solar Panels"

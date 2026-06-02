@@ -226,7 +226,7 @@ async def main() -> None:
             ).scalar_one_or_none()
             if collision is not None and collision.id != row.id:
                 await session.delete(row)
-                print(f"× removed stale duplicate trade {old_name!r}")
+                print(f"- removed stale duplicate trade {old_name!r}")
             else:
                 row.name = new_name
                 print(f"↻ renamed trade {old_name!r} → {new_name!r}")
@@ -244,10 +244,7 @@ async def main() -> None:
 
         # 3. Pre-load every trade so we can look them up by name without
         #    a round-trip per vendor.
-        trades_by_name = {
-            t.name: t
-            for t in (await session.execute(select(Trade))).scalars().all()
-        }
+        trades_by_name = {t.name: t for t in (await session.execute(select(Trade))).scalars().all()}
 
         # 4. Apply each vendor update.
         for upd in VENDOR_UPDATES:
@@ -259,18 +256,14 @@ async def main() -> None:
                 )
             ).scalar_one_or_none()
             if vendor is None:
-                raise RuntimeError(
-                    f"Vendor id={upd.vendor_id} not found — re-check the mapping."
-                )
+                raise RuntimeError(f"Vendor id={upd.vendor_id} not found — re-check the mapping.")
 
             # Resolve trade names; fail loudly on typos.
             new_trades = []
             for name in upd.trades:
                 t = trades_by_name.get(name)
                 if t is None:
-                    raise RuntimeError(
-                        f"Trade {name!r} not found for vendor {vendor.name!r}"
-                    )
+                    raise RuntimeError(f"Trade {name!r} not found for vendor {vendor.name!r}")
                 new_trades.append(t)
 
             # Update scalar fields only when Daryl actually provided one
