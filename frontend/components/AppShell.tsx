@@ -45,6 +45,12 @@ type NavItem = {
   name: string
   href: string
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
+  /** Hidden from the sidebar in production builds. Used for surfaces
+   * that aren't ready for Daryl yet (Storefront has no real content;
+   * Reports is empty until markup data exists). The routes still
+   * resolve directly by URL in any environment — this only controls
+   * sidebar visibility. */
+  devOnly?: boolean
 }
 
 const navigation: NavItem[] = [
@@ -52,9 +58,15 @@ const navigation: NavItem[] = [
   { name: 'Work Orders', href: '/work-orders', icon: ClipboardDocumentListIcon },
   { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
   { name: 'Vendors', href: '/vendors', icon: UsersIcon },
-  { name: 'Storefront', href: '/storefront', icon: GlobeAltIcon },
-  { name: 'Reports', href: '/reports', icon: ChartPieIcon },
+  { name: 'Storefront', href: '/storefront', icon: GlobeAltIcon, devOnly: true },
+  { name: 'Reports', href: '/reports', icon: ChartPieIcon, devOnly: true },
 ]
+
+// process.env.NODE_ENV is inlined by Next at build time. On Vercel
+// (production) devOnly items drop out; on `next dev` they stay.
+const visibleNavigation: NavItem[] = navigation.filter(
+  (item) => process.env.NODE_ENV !== 'production' || !item.devOnly,
+)
 
 export type ShellUser = {
   email: string
@@ -79,7 +91,7 @@ function SidebarContents({ pathname }: { pathname: string }) {
       <ul role="list" className="flex flex-1 flex-col gap-y-7">
         <li>
           <ul role="list" className="-mx-2 space-y-1">
-            {navigation.map((item) => {
+            {visibleNavigation.map((item) => {
               const active = isActive(pathname, item.href)
               return (
                 <li key={item.name}>
