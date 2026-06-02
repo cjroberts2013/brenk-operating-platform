@@ -102,3 +102,31 @@ class StorefrontServicesReplace(BaseModel):
     desired state on every save."""
 
     services: list[StorefrontServiceRef]
+
+
+# Loose email check — we don't pull in email-validator just for the
+# public quote form. Good enough to reject obvious junk; deliverability
+# is proven by whether the reply lands, not by regex.
+_EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
+class QuoteRequest(BaseModel):
+    """Public 'Request a Quote' submission from the storefront."""
+
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=254, pattern=_EMAIL_PATTERN)
+    phone: str | None = Field(default=None, max_length=40)
+    message: str = Field(min_length=1, max_length=5000)
+    # Honeypot: a hidden field real users never fill. Bots that blindly
+    # complete every input trip it; the endpoint silently drops those
+    # (returns success without sending) so bots don't learn they failed.
+    website: str = Field(default="", max_length=200)
+
+
+class QuoteResponse(BaseModel):
+    """Result of a quote submission. `emailed` is False when the lead
+    was captured (logged) but the email send was skipped or failed —
+    the submitter still sees success either way."""
+
+    ok: bool
+    emailed: bool

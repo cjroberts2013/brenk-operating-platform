@@ -25,6 +25,14 @@ const PUBLIC_PATH_PREFIXES = ['/login', '/auth', '/marketing']
  *  belong at canonical paths on every host. */
 const PUBLIC_PATHS = new Set(['/robots.txt', '/sitemap.xml', '/favicon.ico'])
 
+/** Clean top-level URLs for storefront pages that physically live under
+ *  the `/marketing` route group. On the bare domain these already work
+ *  via the host-based rewrite below, but we also rewrite them on EVERY
+ *  host (incl. localhost) so the public CTAs — e.g. "Request a Quote" →
+ *  `/quote` — are clickable in local dev too, not just behind the
+ *  bare-domain rewrite. Keep this list small; one entry per real page. */
+const STOREFRONT_ROUTES = new Set(['/quote'])
+
 /** True when the request host should serve the public marketing
  *  storefront instead of the dashboard. The dashboard lives at
  *  `app.<domain>`; everything else (bare apex, www, etc.) is the
@@ -44,6 +52,17 @@ function isStorefrontHost(host: string): boolean {
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname
   const host = request.headers.get('host') ?? ''
+
+  // 0. Storefront page rewrite (host-agnostic). Clean URLs like /quote
+  //    map to their /marketing route-group file on any host, so the
+  //    public CTAs work in local dev (dashboard host) as well as on the
+  //    bare domain. Returns early — these are public pages that don't
+  //    need the auth gate or session refresh.
+  if (STOREFRONT_ROUTES.has(path)) {
+    const rewriteUrl = request.nextUrl.clone()
+    rewriteUrl.pathname = `/marketing${path}`
+    return NextResponse.rewrite(rewriteUrl)
+  }
 
   // 1. Bare-domain rewrite. If we're on a storefront host and the
   //    path doesn't already start with /marketing, /api, /_next,

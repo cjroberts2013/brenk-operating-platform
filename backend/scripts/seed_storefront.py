@@ -39,7 +39,7 @@ PAGE_CONTENT = {
         "your property needs."
     ),
     "hero_cta_text": "Get a quote",
-    "hero_cta_link": "#contact",
+    "hero_cta_link": "/quote",
     "hero_image_url": None,
     "about_heading": "A family business, built on relationships.",
     "about_body": (

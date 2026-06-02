@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
 
     # -------------------------------------------------------------------------
+    # Email (Resend) — powers the storefront "Request a Quote" form.
+    # When RESEND_API_KEY is empty the quote endpoint still accepts and
+    # logs submissions (so leads aren't lost) but skips the actual send.
+    # QUOTE_FROM_EMAIL must be on a Resend-verified domain in prod; the
+    # default `onboarding@resend.dev` only delivers to the account owner
+    # until brenkfacilityservices.com is verified.
+    # -------------------------------------------------------------------------
+    RESEND_API_KEY: str = ""
+    QUOTE_FROM_EMAIL: str = "Brenk Facility Services <quotes@brenkfacilityservices.com>"
+    QUOTE_TO_EMAIL: str = "daryl@brenkfacilityservices.com"
+
+    # -------------------------------------------------------------------------
     # Observability
     # -------------------------------------------------------------------------
     SENTRY_DSN: str = ""

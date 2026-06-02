@@ -263,67 +263,15 @@ export function StorefrontEditor({ initial }: { initial: Storefront }) {
         </Field>
       </EditorSection>
 
-      {/* -------- About -------- */}
-      <EditorSection
-        title="About"
-        subtitle="Who Brenk is and why customers choose them."
-        dirty={pageDirty}
-        onSave={savePage}
-        pending={pending}
-        error={null /* shared error shown above */}
-        savedTick={savedPageTick}
-        hideSave
-      >
-        <Field label="Heading">
-          <TextInput
-            value={page.about_heading}
-            onChange={(v) => setField('about_heading', v)}
-            placeholder="A family business, built on relationships."
-          />
-        </Field>
-        <Field label="Body">
-          <TextArea
-            value={page.about_body}
-            onChange={(v) => setField('about_body', v)}
-            rows={6}
-            placeholder="Founded by Daryl Brenk in…"
-          />
-        </Field>
-        <Field label="Photo URL">
-          <TextInput
-            value={page.about_image_url}
-            onChange={(v) => setField('about_image_url', v)}
-          />
-        </Field>
-      </EditorSection>
-
-      {/* -------- Service Area -------- */}
-      <EditorSection
-        title="Service area"
-        subtitle="Where Brenk works. Visitors check this first."
-        dirty={pageDirty}
-        onSave={savePage}
-        pending={pending}
-        error={null}
-        savedTick={savedPageTick}
-        hideSave
-      >
-        <Field label="Heading">
-          <TextInput
-            value={page.service_area_heading}
-            onChange={(v) => setField('service_area_heading', v)}
-            placeholder="Serving Austin and San Antonio"
-          />
-        </Field>
-        <Field label="Body">
-          <TextArea
-            value={page.service_area_body}
-            onChange={(v) => setField('service_area_body', v)}
-            rows={4}
-            placeholder="We cover commercial properties across the I-35 corridor…"
-          />
-        </Field>
-      </EditorSection>
+      {/* About + Service Area sections hidden 2026-05-28.
+       *
+       * The new hi-fi homepage (per `docs/design_handoff_brenk_homepage/`)
+       * has no slots for these — they were folded into the Stats Band,
+       * Why Brenk, Testimonial, and footer instead. The underlying DB
+       * columns (`about_*`, `service_area_*`) are intentionally
+       * preserved so we can restore the editor surface or repurpose
+       * the data without a migration. Just stop rendering the editor
+       * panels for now. */}
 
       {/* -------- Contact -------- */}
       <EditorSection
