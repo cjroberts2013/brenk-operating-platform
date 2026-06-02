@@ -180,6 +180,38 @@ stays public and the dashboard stays locked.
   `https://app.brenkfacilityservices.com` against the Fly backend
   returns the right `Access-Control-Allow-Origin` + credentials.
 
+**Completed (Phase 1 refinement, 2026-06-02):**
+- **Reports page** (`/reports`): markup/spend analytics, margin
+  actual-vs-default by trade + spend by vendor + top-line totals,
+  from a DB-free aggregation service (`app/services/reports.py`,
+  unit-tested). Empty state until markup data exists.
+- **Vendor-notified pipeline milestone**: `brenk_vendor_notified_at`
+  on work orders, set from the WO-detail workflow checklist
+  ("Mark notified"). Tracks the "assigned but never texted" failure
+  mode. Backend mirrors the `paid` action shape.
+- **Dev-only sidebar tabs**: Storefront + Reports hidden in
+  production (`AppShell.tsx`, gated on `NODE_ENV`); the routes still
+  resolve by direct URL in any environment.
+- **Storefront "Request a Quote" form** (`/quote`): public form posts
+  to `POST /api/v1/storefront/quote`, which emails Daryl via **Resend**
+  (`app/services/email.py`). Branded inline-styled HTML + plain-text,
+  tap-to-call/reply buttons, timestamp, honeypot; the lead is always
+  logged so it survives even if email is down. All "Request a Quote"
+  CTAs repointed to `/quote`; `proxy.ts` `STOREFRONT_ROUTES` makes the
+  clean URL resolve on every host (including local dev).
+- **Storefront contact info**: phone (512) 369-2719 and
+  daryl@brenkfacilityservices.com (`components/marketing/data.ts`).
+- **Backend lint**: ruff 44 to 0 errors; trades now ordered
+  case-insensitively (deterministic across DB collations).
+
+**Quote-email prod to-dos (storefront emails won't send live until):**
+- `fly secrets set RESEND_API_KEY=… QUOTE_FROM_EMAIL='Brenk Facility Services <quotes@brenkfacilityservices.com>' QUOTE_TO_EMAIL=daryl@brenkfacilityservices.com -a brenk-platform-web`
+- Resend domain `brenkfacilityservices.com` verified (done 2026-06-02);
+  sender is `quotes@brenkfacilityservices.com`.
+- Set the prod storefront `hero_cta_link` to `/quote` (Storefront
+  editor or re-seed; prod DB still has the old anchor).
+- Optional: DMARC TXT record at GoDaddy for sender reputation.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)
@@ -187,11 +219,11 @@ Live URLs:
 - Backend health: https://brenk-platform-web.fly.dev/health
 
 **Not yet done:**
-- Markup helper / Settings page (Daryl's markup-board rules)
 - Junction table for multi-vendor-per-WO (current model is single
   `assigned_vendor_id`; deferred until pipeline funnel surfaces the need)
 - Daryl onboarding walk-through — sign him in and watch him use it
-- 10 pre-existing ruff errors in legacy backend files
+- Quote-email prod wiring (Fly secrets + prod `hero_cta_link`) — see
+  the "Quote-email prod to-dos" list above
 
 ## Tech Stack
 

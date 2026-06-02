@@ -1126,6 +1126,19 @@ Replaying the user's captured token is **not** an integration path —
 it's a short-lived, interactive-login JWE; useful only as the
 read-only proof (done) that token issuance is the one and only gap.
 
+**Corroborating signal (2026-06-01):** the partner-API
+`GET /v3/api/providers/IsSdiMobileEnabled` returns `{"IsEnabled":
+false}` for our provider account. SDI = ServiceChannel's mobile/dispatch
+integration — the same family as Workforce. That this flag is off is
+consistent with the Workforce 401, and gives the SC ask a concrete
+hook: *"IsSdiMobileEnabled is false for our account — is enabling that
+(or whatever provisions SDI Mobile / Workforce) what grants the
+technician/dispatch API access?"* (Surveyed the rest of the Swagger
+Providers + Subscribers groups too — `getbytrade`, `GetProvidersRanking`,
+`GetRecent/GetLast`, subscriber `trades`/`rules`/`dashboards`, etc. None
+expose sub→WO assignment; they're subscriber-facing lookups or
+provider/subscriber admin writes. Workforce remains the only route.)
+
 **Status:** fully located and characterized; integration shape +
 vendor mapping known and verified end-to-end against live data.
 **Blocked solely on Workforce API token issuance** — a vendor/
