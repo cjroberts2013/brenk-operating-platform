@@ -900,3 +900,284 @@ WOs SC thinks they're on?").
 prod), this becomes a write-back feature — Daryl assigns in our app,
 we PATCH the SC Assignee field. That depends on `/v3/workorders/{id}`
 accepting writes, which is a separate Phase 1.5 investigation.
+
+### Production probe results (2026-05-30) — NOT FOUND
+
+Ran the queued probes against **live production** SC via
+`backend/scripts/probe_sc_assignee.py` (read-only; re-runnable with
+`python scripts/probe_sc_assignee.py .env.production`). The
+"prod will populate Assignee" hypothesis is **falsified** — the
+assignment Daryl sees in the SC web UI is not exposed on any read
+surface our app token can reach.
+
+Evidence:
+
+- **REST `/v3/workorders` (list + `/v3/workorders/{id}` detail):**
+  no `Assignee` key at all in the payload — not empty, absent.
+- **OData `/v3/odata/workorders`:** the `Assignee` field *is* in the
+  schema but **empty across the entire prod set**. The decisive query
+  `?$filter=Assignee/UserId ne null` returns **0 work orders** (server-
+  side filter over all WOs, not a page sample).
+- **`Assignee` is a complex type, not a navigation property** — its
+  EDM type is `ServiceChannel.Services.Messaging.Workorders.AssigneeUser`
+  = `{ UserId: Int32, UserName: String }`. That's why `$expand=Assignee`
+  400s ("Could not find a property named Assignee" as a nav). It comes
+  back inline via `$select`, just unpopulated.
+- **`/v3/odata/employees`:** 404 — the collection does not exist in
+  production (the May 21 notes guessed it did; it doesn't).
+- **`/v3/odata/users` has no WorkOrders relation** — `$expand=WorkOrders`
+  400s. User rows do carry `DashboardAssigned`, `Roles`, `Permissions`,
+  `Access`, `FeedRole`, `SubscriberId` — user-level config, no per-WO
+  assignment link.
+- **Provider path is the *account* relationship, not employee-level.**
+  `$expand=Provider` on a WO hydrates fine but returns **Brenk itself**
+  (the servicing provider on CubeSmart's account) on every WO — not the
+  sub-vendor and not a named tech. The `GetProviderAssignments` OData
+  function exists but returns **0 rows**; `providerassignment` as a
+  direct entity set is 404. `ProviderAssignment` models CubeSmart's
+  trade/location → provider routing, not Brenk's internal tech
+  assignment.
+
+**Conclusion:** there is no readable employee→WO mapping for Brenk's
+account. Two reasons are consistent with the data: (a) Brenk never
+writes a named SC `Assignee` (Daryl "self-assigns" may mean accepting
+the WO as the provider, which lands in `Provider`/acceptance state, not
+`Assignee`), or (b) the web UI reads an internal, non-public endpoint
+our OAuth scope can't see.
+
+**Only remaining read avenue** is doc probe #4 — open the SC web UI
+with browser devtools, click an employee's assigned-WO view, and copy
+whatever URL the UI calls. That requires an interactive SC portal
+login (Charles), so it's parked until we're in the portal anyway; it
+may also turn out to be an internal endpoint we can't authenticate
+against.
+
+**Decision:** stop pursuing this as a *read* feature for now. The
+"Tech-assigned in SC" cross-reference panel is **shelved** — Brenk-
+native vendor assignment (our DB) stays the single source of truth on
+the vendor detail page. If Daryl specifically wants SC-side assignment
+visibility later, the realistic path is the **write-back** branch
+(Phase 1.5): we PATCH `Assignee` from our app so the field we read is
+the field we wrote. That's gated on the same `/v3/workorders/{id}`
+write investigation as the rest of Phase 1.5.
+
+### Deep dive #2 (2026-05-30) — it's the Sub-Contractors tab, and it's portal-internal
+
+Daryl sent a screenshot of the actual SC portal page that shows the
+mapping: the provider portal's **Sub-Contractors** tab (sibling to an
+empty **Employees** tab). Each sub-contractor row has an "ASSIGN WO"
+button with a count badge, and expanding one reveals "Work Orders
+Currently Assigned" listing WO tracking numbers (TN#), store IDs, and
+trade. Top of page: "WOs: 0 UNASSIGNED / 15 ASSIGNED".
+
+Key correction to deep-dive #1: this is **sub-contractor assignment**,
+not SC "employee/Assignee" assignment. The sub-contractors are SC
+**user** accounts Brenk created under its own provider
+(`admin+N@brenkfacilityservices.com`, `UserType = Corporate`). We
+mapped them: Mario (GTY) = UserId `7197521`, Javier Aboytes = `6071813`,
+Larry Marshall = `6057515`, etc. (29 users total, 27 are subs).
+
+Reverse-engineered from Mario's three known-assigned WOs (TN#
+349845852, 349767724, 347581885 — TN# == both `Number` and `Id`):
+
+- **The assignment is on a separate resource, NOT the work order.**
+  Recursively searched each WO's full OData + REST payload for Mario's
+  UserId / name / email / "GTY" → **zero hits**. `Assignee` is `None`
+  on all three (consistent with the full-set `Assignee/UserId ne null`
+  = 0 from deep-dive #1).
+- **Not in notes or work activities.** `workorders({id})/workactivities`
+  = 0 rows. The 6 notes are all SC↔Brenk dispatch + store chatter
+  (`SystemNote`/`UsersNote`), none referencing the sub. So we can't
+  derive assignment from the notes we already sync.
+- **Not in any sibling collection.** `trucks` = 0 rows.
+  `GetProviderAssignments` = 0 rows (tried bare, `$top`, `$expand`).
+  `providerassignment` entity set = 404. `LinkedWorkOrders` /
+  `LinkedInWorkOrders` on the assigned WO = both empty (so it's not
+  modeled as a subcontracted child WO either).
+- **Users aren't queryable for it.** `users(7197521)` by key → 500
+  ("Multiple actions" — routing collision with the `scimusers`
+  function import). No WO navigation property on `User`
+  (`$expand=WorkOrders` etc. all error).
+- **REST filter params are ignored.** `/v3/workorders?assignedTo=…`
+  (and `userId`/`technicianId`/`subcontractorId`/`assignedUserId`)
+  return the same unfiltered default page — the params are silently
+  dropped, no assignment filter exists.
+
+Full OData entity-set inventory for the record: `assets, workorders,
+rfps, locations, trades, invoices, InvoiceLabor, InvoiceMaterial,
+InvoiceTravel, InvoiceOther, notes, attachments, workactivities,
+proposals, providerassignment, GetProviderAssignments, MliUserInfo,
+MlpUserInfo, users, providers, detailedProviders, subscribers, trucks,
+weatherEvents`. None expose sub→WO assignment with data in them.
+
+**Conclusion:** the Sub-Contractors "ASSIGN WO" feature is a
+**provider-portal-internal** capability. Its data is not in the public
+v3 API (REST or OData) on `api.servicechannel.com`. The portal page
+must call a different (internal) endpoint.
+
+**The one definitive remaining step** — capture the network request the
+portal fires when it renders "Work Orders Currently Assigned" for a
+sub. Whatever URL that is, it returns this data by definition. Pending:
+Charles to grab it from DevTools → Network (XHR/Fetch) while expanding a
+sub-contractor in the portal, and paste the request URL + response
+shape. If it lives on `api.servicechannel.com` and accepts our OAuth
+token, we can replicate it; if it's an internal portal endpoint with
+cookie/session auth, reading it programmatically is likely off the
+table and we'd fall back to the write-back branch above.
+
+Re-runnable probes for all of the above live in
+`backend/scripts/probe_sc_assignee.py` plus the ad-hoc queries captured
+in this section.
+
+### FOUND (2026-05-30) — it's a different product: SC Workforce
+
+Charles captured the portal's network call. The Sub-Contractors
+"Work Orders Currently Assigned" panel is served by a **separate
+ServiceChannel product** — SC **Workforce** (the GPS / mobile
+check-in system), not the partner API we integrate with:
+
+```
+GET https://workforce.servicechannel.com/api/manager/technician/{technicianId}/dispatchedWOs
+```
+
+- **Host / backend:** `workforce.servicechannel.com`, which fronts
+  `prod-workforce.azurewebsites.net` (an Azure app). Completely
+  separate from `api.servicechannel.com`.
+- **Identity is a Workforce `technicianId`, not the SC user id.**
+  The captured request used `technicianId = 515425`; the SC user id
+  for the corresponding sub is a different number (e.g. Mario =
+  `7197521`). There is a distinct technician-identity namespace we
+  don't currently have a mapping for.
+- **Rich response.** Each dispatched WO carries `TrackingNumber`
+  (== WO Number/Id), `StoreId`, `Trade`/`TradeId`, `Category`, a full
+  `Location` block (lat/long, address, SubscriberId), `ScheduleDate`,
+  `PrimaryStatus`/`ExtendedStatus`, `ProviderId`, **plus GPS/check-in
+  fields**: `IsAccessGranted`, `CheckInOutInfos`, `CheckInOutEvents`,
+  `BadgePresentedDate`, `FirstScanAvailable`, `QrCodeWorkforceUrl`,
+  `IsPreAssigned`.
+
+**Bonus discovery:** those GPS/check-in fields are the **"Vendor
+on-site 📍"** lifecycle stage we previously documented as having *no
+signal to us* (see the lifecycle table in CLAUDE.md). SC Workforce
+access would unlock **two** things at once: the sub→WO assignment
+mapping *and* real on-site confirmation.
+
+**The blocker — auth.** Our partner-API OAuth bearer token is
+**rejected** by the Workforce host:
+
+```
+GET https://workforce.servicechannel.com/api/manager/technician/515425/dispatchedWOs
+Authorization: Bearer <our partner-API token>
+-> 401 {"Message":"Authorization has been denied for this request."}
+```
+
+So Workforce is a different auth realm. The browser reaches it via the
+portal session (cookie or a Workforce-issued token from the portal
+login), which our client-credentials/password grant against the partner
+API does not satisfy. `GET /api/manager/technician/515425` (no
+`/dispatchedWOs`) 404s and leaks the Azure backend name, confirming a
+distinct app.
+
+**Auth mechanism (confirmed).** The Workforce call carries an
+`Authorization: Bearer <token>` header. The token is a **JWE**
+(`{"alg":"dir","enc":"A128CBC-HS256","typ":"JWT","cty":"JWT"}`) —
+i.e. *encrypted*, not just signed, so it's opaque to us (we can't
+read its claims). It's issued by the SC portal SSO (the session also
+sets `fx_tickauth` / `fx_ticksess_PRODUCTION` cookies). This is a
+different token than our partner-API grant produces, and our
+partner-API token is rejected (401, above).
+
+**Confirmed integration shape (replayed a live portal token,
+read-only).** With a valid Workforce Bearer token, the whole feature
+is reachable and clean:
+
+- `GET /api/manager/technicians` → the full technician roster (24 for
+  Brenk). Each record has `TechnicianId`, `TechnicianContractorId`,
+  `FirstName`/`LastName`, `Email`, `LoginName`,
+  `DispatchedWorkOrders` + `DispatchedWorkOrdersCount` (assignment
+  counts inline!), plus GPS/vetting fields (`HasBadge`,
+  `BgCheckStatus`, `QrCodeWorkforceUrl`).
+- `GET /api/manager/technician/{TechnicianId}/dispatchedWOs` → that
+  tech's assigned WOs with `TrackingNumber` (== our WO id), `StoreId`,
+  `Trade`, full `Location`, status, **and GPS check-in**
+  (`IsAccessGranted`, `CheckInOutEvents`, `BadgePresentedDate`,
+  `FirstScanAvailable`).
+- **Vendor mapping is by email.** Every technician's `LoginName`/`Email`
+  is the `admin+N@brenkfacilityservices.com` address we already sync
+  onto our vendor rows, so the join is a trivial case-insensitive email
+  match — the same fallback `vendor sync` already uses. (The Workforce
+  `TechnicianId`, e.g. Mario = 629450, is a *different* namespace from
+  the partner-API SC user id, e.g. Mario = 7197521; email is what
+  bridges them. The roster also includes Daryl himself,
+  `TechnicianId` 146020.)
+
+**The sole remaining blocker is token issuance.** We need a way to
+obtain a Workforce Bearer token from a backend (no interactive
+browser). Options, in order of preference:
+1. SC provisions **Workforce API access** for our provider account
+   (documented token endpoint / client credential). Best case.
+2. Our existing SC username/password works against a Workforce-specific
+   OAuth/token endpoint we don't yet know. (Do **not** brute-force
+   this against prod — ask SC for the endpoint.)
+3. Fallback: no API → keep Brenk-native assignment as source of truth;
+   optionally a manual/CSV path. Least desirable.
+
+Replaying the user's captured token is **not** an integration path —
+it's a short-lived, interactive-login JWE; useful only as the
+read-only proof (done) that token issuance is the one and only gap.
+
+**Status:** fully located and characterized; integration shape +
+vendor mapping known and verified end-to-end against live data.
+**Blocked solely on Workforce API token issuance** — a vendor/
+permissions question for ServiceChannel. Bundle with the Phase 1.5
+SC-permissions ask (invoice push). If unblocked, this delivers **two**
+features: the sub→WO assignment cross-reference panel *and* the
+"Vendor on-site 📍" GPS stage.
+
+### Second path — partner-API `techniciansAssigned` (permission-gated)
+
+The SC partner-API Swagger documents
+`GET /workorders/{workorderId}/techniciansAssigned` —
+"Retrieve list of technicians assigned to the specified work order"
+(tagged **Subscribers**). This is on the **same partner API our token
+already authenticates against** — no separate auth realm. If grantable,
+it's the cleaner integration (reuses `ServiceChannelClient`).
+
+Tested 2026-05-30 against known-assigned WOs (Mario's 349845852,
+Javier's 343852740 / 339416951) and a recent one:
+
+```
+GET /v3/workorders/{id}/techniciansAssigned
+-> 401 {"ErrorCodes":[504],"ErrorCode":504,
+        "ErrorMessage":"API call rejected by security permissions"}
+```
+
+Same `504 / security permissions` gate we hit on `/v3/users`. Note the
+endpoint is tagged **Subscribers** (CubeSmart's side).
+
+**Confirmed subscriber-only (2026-06-01).** Re-ran in **sandbox** once
+SC's gateway recovered — same `504 "API call rejected by security
+permissions"` on every WO (Mario's 349845852 + 4 real sandbox WOs).
+So it's *not* a prod-only permission quirk: our **provider** account is
+not authorized for this **subscriber**-scoped endpoint in *either*
+environment. Treat the partner-API read path as **dead for us** — don't
+count on `techniciansAssigned` being grantable to a provider. (The 200
+response model still isn't visible to us since we can't get a non-error
+response.)
+
+**Net: Workforce API is the only viable read route for Brenk.**
+
+**Path ranking after the 2026-06-01 sandbox confirmation:**
+1. **Workforce API** (`/api/manager/technicians` + `/dispatchedWOs`) —
+   **the only viable read route.** Confirmed working with a token,
+   richer than the alternative (GPS check-in, assignment counts). Blocked
+   only on a server-to-server Workforce token-issuance path. *This is the
+   primary SC ask.*
+2. ~~Partner API `/workorders/{id}/techniciansAssigned`~~ — **dead for
+   us.** `504 security-permissions` for our provider account in *both*
+   prod and sandbox; it's subscriber-scoped. Mention to SC only as "is
+   there any provider-accessible equivalent?", but don't expect it.
+
+The SC conversation should lead with Workforce API access; the
+write-path question (can a provider POST a technician/sub assignment via
+API?) rides along with it.

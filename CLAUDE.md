@@ -26,25 +26,22 @@ sellable.
 
 | Phase | Focus | Status |
 |---|---|---|
-| 1 | Foundation & ServiceChannel Integration | **In progress** |
+| 1 | Foundation & ServiceChannel Integration | **Live in production (2026-05-27)** |
+| 1.5 | SC write-back: invoice push + accept/decline | Not started |
 | 2 | QuickBooks Integration & Invoice Automation | Not started |
 | 3 | Vendor Communication Automation | Not started |
 | 4 | Intelligence & Analytics | Not started |
-| 5 | Public-Facing Business Website (CMS-driven) | Not started |
+| 5 | Public-Facing Business Website (CMS-driven) | **v1 shipped in Phase 1** |
 
-### Possible phase reorder (open decision, 2026-05-19)
+### Phase reorder (resolved 2026-05-26)
 
-Charles is considering promoting the storefront from Phase 5 to
-**Phase 2**, ahead of QuickBooks integration. Rationale: storefront
-is low complexity, ships quickly, gives Brenk an external face Daryl
-can actually point clients at. Decide before starting Phase 2 work.
-
-Tradeoff to weigh: QuickBooks/invoice automation is what directly
-addresses Sue's clipboard + Daryl's markup-board burden, which is
-the current operational pain point. Storefront is mostly marketing
-value, less daily-grind relief. If Daryl needs the invoice workload
-unloaded urgently, keep QuickBooks at Phase 2; if external presence
-is the bigger near-term win, swap them.
+The storefront was originally planned for Phase 5 but shipped as a
+v1 in Phase 1 — same Next.js project, hostname-based routing in
+`proxy.ts`, editor at `/storefront` in the dashboard. The "Phase 2
+vs Phase 5" question is moot: storefront is live; QuickBooks
+(Phase 2) is the next major investment. Phase 1.5 (SC write-back,
+including `POST /invoices`) sits between them as a small follow-on
+once the SC permissions question is unblocked.
 
 ### Phase 5 — Public-Facing Storefront (captured 2026-05-19)
 
@@ -153,26 +150,62 @@ stays public and the dashboard stays locked.
   services, service area, contact, and footer. Singleton content
   row + ordered services list in the backend.
 
+**Completed (production deployment, 2026-05-27):**
+- Second Supabase project (`Brenk Production`) provisioned, all
+  Alembic migrations applied, Procrastinate schema applied
+- Prod SC app registered, OAuth credentials configured
+- Initial prod sync: 336 work orders + 3,008 notes + trades + clients
+  + locations seeded
+- Daryl's curated dev vendor rows exported via
+  `backend/scripts/export_vendors_for_cutover.py` (Brenk-confidential
+  notes preserved) and re-reconciled against prod SC user IDs via
+  the email-fallback path in vendor sync — 20 vendors matched
+- Storefront content seeded for production
+- **Patch**: `classify()` and `stage_filter_clauses()` updated to
+  treat `primary_status = "OPEN"` as `pending_acceptance` (production
+  SC has 9 OPEN-status WOs the sandbox dataset didn't have, so the
+  initial classifier missed them and they were invisible on the
+  dashboard). Commit `4fe76ba`.
+- **Backend on Fly.io**: `brenk-platform-web` (FastAPI, 2 machines
+  in `dfw`, /health green, `release_command = alembic upgrade head`
+  auto-applies migrations on every deploy) + `brenk-platform-worker`
+  (procrastinate, hourly WO sync registered)
+- **Frontend on Vercel**: `brenk-operating-platform` project,
+  production env vars set (Supabase URL + anon key + API base URL),
+  Deployment Protection disabled
+- **DNS at GoDaddy**: A records for apex, www, and app all pointing
+  at Vercel anycast `76.76.21.21`. Stale "Parked" sentinel deleted.
+  TLS certs issued for all three hostnames.
+- **CORS verified end-to-end** — preflight from
+  `https://app.brenkfacilityservices.com` against the Fly backend
+  returns the right `Access-Control-Allow-Origin` + credentials.
+
+Live URLs:
+- Dashboard: https://app.brenkfacilityservices.com/
+- Storefront: https://brenkfacilityservices.com/ (also `www.`)
+- Backend API: https://brenk-platform-web.fly.dev/
+- Backend health: https://brenk-platform-web.fly.dev/health
+
 **Not yet done:**
 - Markup helper / Settings page (Daryl's markup-board rules)
 - Junction table for multi-vendor-per-WO (current model is single
   `assigned_vendor_id`; deferred until pipeline funnel surfaces the need)
-- Production Supabase cutover (export script ready at
-  `backend/scripts/export_vendors_for_cutover.py`)
-- Deployment to Fly.io / Vercel
+- Daryl onboarding walk-through — sign him in and watch him use it
 - 10 pre-existing ruff errors in legacy backend files
 
 ## Tech Stack
 
 - **Language:** Python 3.13
-- **Backend:** FastAPI, Pydantic v2, structlog
-- **Database:** Supabase (managed Postgres)
+- **Backend:** FastAPI, Pydantic v2, structlog — deployed on Fly.io
+  (`brenk-platform-web` + `brenk-platform-worker`, region `dfw`)
+- **Database:** Supabase (managed Postgres) — two projects, dev + prod
 - **ORM:** SQLAlchemy 2.0 with Alembic migrations
 - **Job queue:** Procrastinate (Postgres-backed, no Redis needed)
 - **HTTP client:** httpx + tenacity for retries
 - **Testing:** pytest + respx
-- **Frontend (later):** Next.js + React + Tailwind on Vercel
-- **Hosting:** Fly.io for backend + worker
+- **Frontend:** Next.js 16 + React 19 + Tailwind 4 — deployed on Vercel
+  (`brenk-operating-platform` project)
+- **DNS:** GoDaddy (A records to Vercel anycast `76.76.21.21`)
 - **AI (Phase 2+):** Anthropic Claude API
 
 ## Important Architectural Decisions
@@ -266,57 +299,75 @@ python scripts/test_sc_auth.py
 
 ## What To Work On Next
 
-Vendors (backend + page + sync + assignment) is done. Daryl's real
-contact data + service areas + trade vocabulary are now in dev. Next
-chunk is the **Dashboard pipeline funnel** and the **Invoice queue** —
-the two pages that directly attack Daryl's "WO got lost" failure modes.
+Production cutover is done. The dashboard, invoice queue, vendors,
+and storefront are all live at `app.brenkfacilityservices.com` /
+`brenkfacilityservices.com`. Next chunk is **getting Daryl in front
+of it**, then closing out the small Phase 1 polish items, then
+deciding between Phase 1.5 (SC invoice push) and Phase 2 (QuickBooks).
 
-1. **Dashboard pipeline funnel.** Replaces the placeholder home page.
-   Tailwind UI cashflow-dashboard layout: stat tiles for each lifecycle
-   stage (pink / yellow / yellow+👤 / yellow+💬 / orange / green /
-   green+💵 / invoiced) with counts + average age, plus a "Stuck right
-   now" panel listing WOs sitting too long in any stage.
-2. **Invoice queue.** Tabbed list — "Ready to mark up" / "Marked up,
-   ready to send" / "Sent" / "Paid". Invoice detail view matches
-   Tailwind UI's invoice template (line items, totals, activity).
-   This is Sue's-clipboard replacement and directly unloads the
-   biggest current admin burden. Markup helper (below) surfaces
-   inline here.
-3. **Markup helper.** Per-trade default markup % captured in
-   Settings, suggested (never auto-applied) on the invoice detail
-   for the WO's trade. Full design captured in the "Markup Helper
-   Design" section below — Daryl does the math in his head today
-   so we'll need to iterate; this v1 is just a starting shape.
-4. **SC employee → WO assignment mapping (research + spike).**
-   In the SC web UI, Daryl can see which work orders are assigned
-   to each employee. Our v3 API probe (May 19 session) found the
-   per-WO `Assignee` field empty across all 341 sandbox WOs, so we
-   concluded it wasn't reachable — but that conclusion may have
-   been sandbox-specific. We need to:
-     - Try `/v3/odata/users/{id}/...` and `/v3/odata/employees/{id}/...`
-       variations to see if a per-employee WO list endpoint exists.
-     - Check whether production SC has the Assignee field populated
-       (it almost certainly does, since the web UI reads it).
-     - If we can pull it, surface it on the vendor detail page as
-       a "Tech-assigned in SC" panel next to our Brenk-native
-       assignment. Two sources of truth that we can cross-reference
-       when Daryl asks "did I tell the vendor about this one yet?"
-   This is research, not implementation — capture findings in
-   `docs/architecture/servicechannel-api.md` once we know more.
-5. **Junction table for multi-vendor-per-WO.** Today's model is a
+1. **Daryl onboarding.** Sit with him, sign him in, watch him use it.
+   Goals: confirm the UX matches his mental model, capture the first
+   round of "this is wrong" / "this is missing" feedback, get the
+   markup helper in front of him on a real invoice. Everything below
+   is provisional until this happens — Daryl's reaction may
+   re-rank the list.
+2. **Markup helper / Settings page.** ✅ **Done (committed).**
+   Per-trade default markup % captured in Settings
+   (`/settings` → `MarkupDefaultsTable`), suggested (never
+   auto-applied) on the WO detail markup helper
+   (`components/work-orders/MarkupHelper.tsx`), backed by the
+   `PATCH /api/v1/trades/{id}` endpoint. v1 — expect iteration
+   after Daryl uses it on real invoices. Full design in the
+   "Markup Helper Design" section below.
+3. **Sub-contractor → WO assignment mapping.** 🔎 **FOUND the
+   source — BLOCKED on auth (2026-05-30).** It is *not* in the
+   partner API: `Assignee` is empty across the entire prod WO set,
+   and the data isn't on the WO, notes, work activities, or any
+   OData collection (full probe in
+   `backend/scripts/probe_sc_assignee.py`). Charles captured the SC
+   portal's actual network call — the Sub-Contractors tab is served
+   by a **separate product, SC Workforce** (GPS/check-in), at
+   `GET https://workforce.servicechannel.com/api/manager/technician/{technicianId}/dispatchedWOs`.
+   The payload carries the sub→WO assignment **and** on-site GPS
+   check-in fields (`IsAccessGranted`, `CheckInOutEvents`,
+   `BadgePresentedDate`) — i.e. it would also unlock the "Vendor
+   on-site 📍" lifecycle stage we'd written off as no-signal. **But
+   our partner-API OAuth token is rejected there (401);** Workforce
+   is a different auth realm with its own `technicianId` namespace
+   (vendor↔technician join is by the `admin+N@` email we already
+   sync). The partner-API endpoint
+   `GET /workorders/{id}/techniciansAssigned` is **confirmed dead for
+   us** — `504 security-permissions` for our provider account in *both*
+   prod and sandbox (subscriber-scoped). So **Workforce is the only
+   viable read route**, blocked solely on a server-to-server Workforce
+   token — bundle into the Phase 1.5 SC-permissions ask. If unblocked,
+   delivers the sub→WO assignment panel AND (via Workforce) the "Vendor
+   on-site" GPS stage. Full findings in
+   `docs/architecture/servicechannel-api.md` → the 2026-05-30 "FOUND" +
+   2026-06-01 confirmation sections.
+4. **Junction table for multi-vendor-per-WO.** Today's model is a
    single `assigned_vendor_id`. Daryl sometimes splits one WO across
    two trades (locksmith + electrical, say) — migrate to a
-   `wo_vendor_assignments` join table when the funnel work surfaces
-   the need.
-6. **Production cutover.** Spin up the second free-tier Supabase
-   project, `alembic upgrade head`, run the worker once to seed
-   `trades` and `vendors` from prod SC, then
-   `python scripts/export_vendors_for_cutover.py | psql "$PROD..."`
-   and click "Sync from ServiceChannel". Targeting end of Phase 1.
-   The SC employee→WO research above is a natural pairing for this
-   step, since the sandbox data is unreliable.
+   `wo_vendor_assignments` join table when real usage surfaces the
+   need.
+5. **Phase 1.5: SC invoice push.** `POST /invoices` endpoint
+   confirmed; spike plan + read endpoints (for upfront validation
+   and auto-deriving Sent/Approved/Paid state) documented in
+   `docs/architecture/servicechannel-api.md` → "Invoice endpoints
+   — Phase 1.5 anchor". Blocked on the SC permissions question
+   captured in the SC webhooks + Contractor Request Form docs.
+6. **Phase 2: QuickBooks Integration & Invoice Automation.** The
+   bigger next investment. Scope: pull/push invoices to QBO so
+   Sue's clipboard goes away end-to-end. Not started — kick off
+   after Daryl onboarding + Phase 1.5 unblockers resolved.
 
-**Open questions for the next session:** none currently blocking.
+**Open questions for the next session:**
+- Color-coding pink/yellow/orange/green for SC stages — match SC's
+  exact shades, or use cleaner Tailwind colors? (Daryl can answer
+  on first walk-through.)
+- After Daryl uses the markup helper on ~12 real invoices: is the
+  per-trade default actually matching his choices, or is the rule
+  really per-vendor / per-client?
 
 **Resolved (2026-05-21):**
 - *Markup-board rule shape* — per-trade default markup % stored on
@@ -330,10 +381,17 @@ the two pages that directly attack Daryl's "WO got lost" failure modes.
   origin of the label doesn't matter to him operationally. **Already
   this way in the form modal — no work needed.**
 
+**Resolved (2026-05-27):**
+- *Production cutover* — done. Both Fly apps deployed, Vercel
+  frontend live, DNS + TLS green on all three hostnames, CORS
+  verified end-to-end.
+- *OPEN-status WOs missing from dashboard* — patched. `classify()`
+  + `stage_filter_clauses()` now route OPEN to `pending_acceptance`
+  (matches Daryl's mental model for any pre-acceptance WO).
+
 **Other items still deferred:**
 - ~10 pre-existing ruff errors in `config.py`, `migrations/env.py`,
   and the autogenerated initial migration.
-- Fly.io / Vercel deployment exercise (configs already exist).
 - Local `main` is many commits ahead of `origin/main` — push when
   you're ready (won't push without an explicit ask).
 
@@ -724,11 +782,33 @@ If you change `proxy.ts` rewrites or auth-gates, re-run these.
 
 ## Supabase Environment Strategy
 
-Currently a **single Supabase project** is used for development. At end of
-Phase 1, right before Daryl starts using the dashboard for real, spin up a
-second free-tier Supabase project as production and keep the current one as
-dev. Migrations should then be applied to both. (Supabase's built-in
-branching feature requires the Pro plan, which we're not on.)
+**Two Supabase projects, both live:**
+
+- `Brenk Dev` — original project, used for local development. Connection
+  strings in `backend/.env`.
+- `Brenk Production` — provisioned 2026-05-27. Connection strings in
+  `backend/.env.production` (gitignored). Fly backend reads from this via
+  `fly secrets`; Vercel frontend reads `NEXT_PUBLIC_SUPABASE_URL` +
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` from Vercel env vars.
+
+**Workflow for schema changes:**
+
+1. Develop against dev: edit models, `alembic revision --autogenerate`,
+   `alembic upgrade head`, test locally.
+2. Commit the migration.
+3. Deploy backend to Fly: `fly deploy --config fly.web.toml --remote-only`.
+   The `release_command = "alembic upgrade head"` in `fly.web.toml`
+   auto-applies the migration to prod Supabase before the new image
+   takes traffic. **No manual prod migration step.**
+
+If you ever bring up a third Supabase project (staging, a customer
+fork, etc.), remember the one-time setup beyond Alembic: run
+`procrastinate --app=app.workers.app.procrastinate_app schema --apply`
+against it before the worker boots. Our Alembic migrations don't cover
+Procrastinate's own queue tables.
+
+Supabase's built-in branching feature requires the Pro plan, which we're
+not on — manual two-project setup is the pragmatic alternative.
 
 ## Things To Avoid
 
