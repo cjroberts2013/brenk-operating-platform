@@ -366,6 +366,46 @@ export type DashboardPipeline = {
 }
 
 // =============================================================================
+// Reports (markup / spend analytics)
+// =============================================================================
+
+// Money figures arrive as 2-dp strings (serialized Decimals); the UI
+// formats them. Markup percents are numbers (averages, not money).
+
+export type ReportsTotals = {
+  jobs_with_markup: number
+  total_vendor_cost: string
+  total_margin: string
+  total_billed: string
+  blended_markup_percent: number | null
+}
+
+export type MarkupByTrade = {
+  trade_id: number
+  trade_name: string
+  default_markup_percent: number | null
+  jobs_with_markup: number
+  avg_actual_markup_percent: number | null
+  delta_percent: number | null
+  total_vendor_cost: string
+  total_margin: string
+}
+
+export type VendorSpend = {
+  vendor_id: number
+  vendor_name: string
+  jobs: number
+  total_vendor_cost: string
+  total_margin: string
+}
+
+export type ReportsSummary = {
+  totals: ReportsTotals
+  markup_by_trade: MarkupByTrade[]
+  vendor_spend: VendorSpend[]
+}
+
+// =============================================================================
 // Storefront (Phase 5 — public marketing site + editor)
 // =============================================================================
 
