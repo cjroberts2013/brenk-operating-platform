@@ -7,6 +7,7 @@ import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
 import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
+import { VendorNotifiedControl } from '@/components/work-orders/VendorNotifiedControl'
 import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
 import { ApiError } from '@/lib/api/server'
 import { listVendors } from '@/lib/api/vendors'
@@ -163,6 +164,13 @@ export default async function WorkOrderDetailPage({
                 workOrderId={wo.id}
                 currentVendor={wo.assigned_vendor}
                 activeVendors={activeVendors.items}
+              />
+            }
+            notifyControl={
+              <VendorNotifiedControl
+                workOrderId={wo.id}
+                notifiedAt={wo.brenk_vendor_notified_at}
+                hasVendor={wo.assigned_vendor !== null}
               />
             }
           />

@@ -59,6 +59,7 @@ export type WorkOrderSummary = {
   brenk_markup_percent: string | null
   brenk_marked_up_at: string | null
   brenk_paid_at: string | null
+  brenk_vendor_notified_at: string | null
 }
 
 export type WorkOrderDetail = {
@@ -110,6 +111,7 @@ export type WorkOrderDetail = {
   brenk_markup_percent: string | null
   brenk_marked_up_at: string | null
   brenk_paid_at: string | null
+  brenk_vendor_notified_at: string | null
 
   notes_count: number
   attachments_count: number
@@ -308,6 +310,9 @@ export type WorkOrderUpdate = {
   brenk_markup_percent?: string | null
   /** "now" stamps brenk_paid_at=now(); "clear" resets to null. */
   paid?: 'now' | 'clear'
+  /** "now" stamps brenk_vendor_notified_at=now() (Daryl texted/called
+   *  the assigned sub-vendor); "clear" resets to null. */
+  notified?: 'now' | 'clear'
 }
 
 /** Shape of the body for PATCH /api/v1/trades/{id}. */

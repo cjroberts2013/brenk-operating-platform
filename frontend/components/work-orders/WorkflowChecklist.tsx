@@ -32,6 +32,7 @@ type Stage = {
  * UI (e.g. the vendor-assignment dropdown). Listed centrally so a
  * typo in a label string doesn't silently break the slot wiring. */
 const SUB_VENDOR_STAGE_LABEL = 'Sub-vendor assigned'
+const VENDOR_NOTIFIED_STAGE_LABEL = 'Vendor notified'
 
 function isCompleted(status: string): boolean {
   return status.toUpperCase().includes('COMPLETED')
@@ -81,8 +82,10 @@ export function deriveStages(wo: WorkOrderDetail): Stage[] {
     {
       label: 'Vendor notified',
       source: 'Brenk',
-      state: 'not_tracked',
-      detail: 'Texting tracker lands in Phase 3',
+      state: wo.brenk_vendor_notified_at ? 'done' : 'not_tracked',
+      detail: wo.brenk_vendor_notified_at
+        ? undefined
+        : 'Mark when you’ve texted/called the vendor',
     },
     {
       label: 'Vendor on-site',
@@ -134,11 +137,15 @@ function StageIcon({ state }: { state: StageState }) {
 export function WorkflowChecklist({
   wo,
   vendorControl,
+  notifyControl,
 }: {
   wo: WorkOrderDetail
   /** Optional interactive widget rendered in the "Sub-vendor assigned"
    * row. When present, replaces the row's detail text. */
   vendorControl?: ReactNode
+  /** Optional interactive widget rendered in the "Vendor notified"
+   * row. When present, replaces the row's detail text. */
+  notifyControl?: ReactNode
 }) {
   const stages = deriveStages(wo)
 
@@ -156,25 +163,30 @@ export function WorkflowChecklist({
         {stages.map((stage) => {
           const isVendorStage =
             stage.label === SUB_VENDOR_STAGE_LABEL && vendorControl
+          const isNotifiedStage =
+            stage.label === VENDOR_NOTIFIED_STAGE_LABEL && notifyControl
+          const control = isVendorStage
+            ? vendorControl
+            : isNotifiedStage
+              ? notifyControl
+              : null
+          // When the vendor control is present and the WO has someone
+          // assigned, mark that stage done regardless of what the static
+          // deriveStages logic returned. The notified stage already
+          // reflects its timestamp in deriveStages.
+          const effectiveState: StageState =
+            isVendorStage && wo.assigned_vendor ? 'done' : stage.state
           return (
             <li
               key={stage.label}
               className="flex items-start gap-3 px-4 py-2.5 text-sm"
             >
-              <StageIcon
-                state={
-                  // When the vendor control is present and the WO has
-                  // someone assigned, mark this stage done regardless of
-                  // what the static deriveStages logic returned.
-                  isVendorStage && wo.assigned_vendor ? 'done' : stage.state
-                }
-              />
+              <StageIcon state={effectiveState} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span
                     className={
-                      stage.state === 'done' ||
-                      (isVendorStage && wo.assigned_vendor)
+                      effectiveState === 'done'
                         ? 'font-medium text-gray-900 dark:text-white'
                         : 'text-gray-500 dark:text-gray-400'
                     }
@@ -185,8 +197,8 @@ export function WorkflowChecklist({
                     {stage.source}
                   </span>
                 </div>
-                {isVendorStage ? (
-                  <div className="mt-1">{vendorControl}</div>
+                {control ? (
+                  <div className="mt-1">{control}</div>
                 ) : stage.detail ? (
                   <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                     {stage.detail}

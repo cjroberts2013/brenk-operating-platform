@@ -101,3 +101,20 @@ export async function setPaidAction(
   revalidatePath('/')
   return { error: null }
 }
+
+/** Toggle the "vendor notified" milestone — Daryl texted/called the
+ *  assigned sub-vendor. `mark` true → stamp now(), false → clear. */
+export async function setNotifiedAction(
+  workOrderId: number,
+  mark: boolean,
+): Promise<MarkupActionResult> {
+  try {
+    await updateWorkOrder(workOrderId, { notified: mark ? 'now' : 'clear' })
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath(`/work-orders/${workOrderId}`)
+  revalidatePath('/')
+  return { error: null }
+}

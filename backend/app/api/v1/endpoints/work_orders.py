@@ -73,6 +73,10 @@ class WorkOrderUpdate(BaseModel):
     # leaves the column untouched. We avoid a free-form datetime here
     # so backdating is intentional (would need a separate endpoint).
     paid: Literal["now", "clear"] | None = Field(default=None)
+    # Same action shape as `paid`: `notified: "now"` stamps
+    # `brenk_vendor_notified_at = now()` (Daryl texted/called the
+    # assigned sub-vendor), `"clear"` resets it to null.
+    notified: Literal["now", "clear"] | None = Field(default=None)
 
 
 class WorkOrderSyncStatus(BaseModel):
@@ -367,6 +371,10 @@ async def update_work_order(
         moment is what we want to remember.
       - `paid` — pass "now" to stamp `brenk_paid_at = now()`, or
         "clear" to reset to null. Omit to leave alone.
+      - `notified` — pass "now" to stamp
+        `brenk_vendor_notified_at = now()` (Daryl texted/called the
+        assigned sub-vendor), or "clear" to reset to null. Omit to
+        leave alone.
 
     SC-owned fields (status, dates, notes_count, etc.) are never
     touched here — those flow in via the sync worker.
@@ -415,6 +423,13 @@ async def update_work_order(
             wo.brenk_paid_at = datetime.now(UTC)
         elif action == "clear":
             wo.brenk_paid_at = None
+
+    if "notified" in update_data:
+        action = update_data["notified"]
+        if action == "now":
+            wo.brenk_vendor_notified_at = datetime.now(UTC)
+        elif action == "clear":
+            wo.brenk_vendor_notified_at = None
 
     await db.commit()
     # populate_existing rebuilds the in-memory WO from the new SELECT

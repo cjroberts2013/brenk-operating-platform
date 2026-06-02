@@ -275,6 +275,12 @@ class WorkOrder(Base, TimestampMixin):
     brenk_marked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     brenk_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Brenk-internal pipeline milestone: when Daryl notified (texted/
+    # called) the assigned sub-vendor about this WO. Tracks the
+    # "assigned in our heads but never actually told them" failure
+    # mode. Null = not yet notified. SC has no equivalent.
+    brenk_vendor_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Sync metadata
     raw_data: Mapped[dict | None] = mapped_column(JSONB)
     last_synced_at: Mapped[datetime] = mapped_column(

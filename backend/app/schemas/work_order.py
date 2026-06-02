@@ -77,6 +77,7 @@ class WorkOrderSummary(_OrmModel):
     brenk_markup_percent: Decimal | None
     brenk_marked_up_at: datetime | None
     brenk_paid_at: datetime | None
+    brenk_vendor_notified_at: datetime | None
 
 
 class WorkOrderDetail(_OrmModel):
@@ -139,6 +140,7 @@ class WorkOrderDetail(_OrmModel):
     brenk_markup_percent: Decimal | None
     brenk_marked_up_at: datetime | None
     brenk_paid_at: datetime | None
+    brenk_vendor_notified_at: datetime | None
 
     notes_count: int
     attachments_count: int
