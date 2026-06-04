@@ -58,3 +58,6 @@ docs/api-samples/raw/
 *.sqlite
 *.sqlite3
 docs/api-samples/workorder-list-sample.json
+
+# Local business docs (invoices, etc.) — not source
+files/
