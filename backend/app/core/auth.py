@@ -68,11 +68,7 @@ async def _fetch_jwks(*, force: bool = False) -> dict[str, Any]:
     """
     global _jwks_cache, _jwks_cache_at
     now = time.time()
-    if (
-        not force
-        and _jwks_cache is not None
-        and (now - _jwks_cache_at) < _JWKS_CACHE_TTL_SECONDS
-    ):
+    if not force and _jwks_cache is not None and (now - _jwks_cache_at) < _JWKS_CACHE_TTL_SECONDS:
         return _jwks_cache
 
     settings = get_settings()

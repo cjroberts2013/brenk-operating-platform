@@ -65,9 +65,7 @@ async def sync_all_work_orders(
     async for payload in client.iter_work_orders(max_pages=max_pages):
         summary["fetched"] += 1
         sc_id = payload.get("Id")
-        incoming_notes_count = (
-            (payload.get("Notes") or {}).get("Count", {}).get("Total", 0)
-        )
+        incoming_notes_count = (payload.get("Notes") or {}).get("Count", {}).get("Total", 0)
 
         try:
             async with AsyncSessionLocal() as session:

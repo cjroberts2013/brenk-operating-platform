@@ -57,7 +57,7 @@ async def _upsert_user_as_vendor(
         raise ValueError(f"SC user payload missing Id: {user}")
 
     name = (user.get("FullName") or user.get("UserName") or f"SC user {user_id}").strip()
-    email = (user.get("Email") or user.get("UserName") or None)
+    email = user.get("Email") or user.get("UserName") or None
     disabled = bool(user.get("Disabled", False))
 
     # Match strategy 1: exact sc_user_id.
@@ -71,9 +71,7 @@ async def _upsert_user_as_vendor(
     # existing row's sc_user_id to the new value.
     if existing is None and email:
         existing = (
-            await session.execute(
-                select(Vendor).where(func.lower(Vendor.email) == email.lower())
-            )
+            await session.execute(select(Vendor).where(func.lower(Vendor.email) == email.lower()))
         ).scalar_one_or_none()
         if existing is not None:
             logger.info(
@@ -135,9 +133,7 @@ async def sync_vendors_from_sc(
                     summary["updated"] += 1
             except Exception as exc:
                 logger.exception("vendor upsert failed", sc_user_id=user.get("Id"))
-                summary["errors"].append(
-                    {"sc_user_id": user.get("Id"), "error": str(exc)}
-                )
+                summary["errors"].append({"sc_user_id": user.get("Id"), "error": str(exc)})
         await session.commit()
 
     logger.info(
