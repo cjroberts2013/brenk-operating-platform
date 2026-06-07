@@ -57,7 +57,6 @@ export function SiteFooter({
             {copyright ??
               '© 2026 Brenk Facility Services. Licensed · Bonded · Insured.'}
           </span>
-          <span>Privacy · Terms · Accessibility</span>
         </div>
       </div>
     </footer>

@@ -12,17 +12,14 @@ export function ValueProps() {
   return (
     <section className="py-24">
       <div className="mx-auto w-full max-w-[1200px] px-5 sm:px-8">
-        {/* Center-aligned section heading */}
-        <div className="mx-auto max-w-[720px] text-center">
-          <span className="eyebrow justify-center">
-            Why facility managers choose Brenk
-          </span>
+        <div className="max-w-[720px]">
+          <span className="eyebrow">Why facility managers choose Brenk</span>
           <h2 className="mt-4 mb-[14px] font-display text-[clamp(30px,3.6vw,44px)] leading-[1.06] font-extrabold tracking-[-0.02em] text-ink">
             Less coordination. More uptime.
           </h2>
         </div>
 
-        <div className="mt-[52px] grid grid-cols-1 gap-[22px] min-[620px]:grid-cols-2 min-[1000px]:grid-cols-4">
+        <div className="mt-[52px] grid grid-cols-1 gap-[22px] min-[620px]:grid-cols-3">
           {VALUE_PROPS.map((v) => (
             <div
               key={v.title}

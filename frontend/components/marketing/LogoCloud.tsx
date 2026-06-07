@@ -1,7 +1,7 @@
 /**
- * Social-proof logo strip. 6 placeholder boxes for v1; swap for
- * real grayscale client logos when Daryl provides them. Replace
- * with real <Image> elements at that point.
+ * Social-proof logo strip of real served-facility brands. Logos render
+ * full-color at a uniform height, centered and wrapping. Files live in
+ * frontend/public.
  */
 
 import { CLIENT_LOGOS } from './data'
@@ -11,16 +11,17 @@ export function LogoCloud() {
     <section className="py-[72px]">
       <div className="mx-auto w-full max-w-[1200px] px-5 text-center sm:px-8">
         <div className="font-mono-brand text-[12.5px] tracking-[0.12em] text-slate-soft uppercase">
-          Trusted by facility & property teams across the region
+          Trusted by facility &amp; property teams across the region
         </div>
-        <div className="mt-[30px] grid grid-cols-3 items-center gap-[18px] min-[620px]:grid-cols-6">
-          {CLIENT_LOGOS.map((label, i) => (
-            <div
-              key={i}
-              className="grid h-[44px] place-items-center rounded-md border border-dashed border-line-brand bg-mist font-mono-brand text-[10px] tracking-[0.08em] text-slate-soft"
-            >
-              {label}
-            </div>
+        <div className="mt-[34px] flex flex-wrap items-center justify-center gap-x-14 gap-y-8">
+          {CLIENT_LOGOS.map((logo) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={logo.src}
+              src={logo.src}
+              alt={logo.alt}
+              className="h-14 w-auto max-w-[240px] object-contain sm:h-20"
+            />
           ))}
         </div>
       </div>

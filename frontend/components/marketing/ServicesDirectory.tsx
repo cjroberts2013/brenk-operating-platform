@@ -18,23 +18,15 @@ export function ServicesDirectory() {
   return (
     <section id="services" className="bg-mist py-24">
       <div className="mx-auto w-full max-w-[1200px] px-5 sm:px-8">
-        <div className="flex flex-wrap items-end justify-between gap-6">
-          <div className="max-w-[720px]">
-            <span className="eyebrow">What we do</span>
-            <h2 className="mt-4 mb-[14px] font-display text-[clamp(30px,3.6vw,44px)] leading-[1.06] font-extrabold tracking-[-0.02em] text-ink">
-              Everything your facility needs, under one roof
-            </h2>
-            <p className="text-[19px] leading-[1.6] text-slate-body">
-              From day-to-day maintenance to ground-up construction, a single
-              source of accountability across every trade.
-            </p>
-          </div>
-          <a
-            href="#"
-            className="inline-flex items-center justify-center gap-[9px] rounded-md border-[1.5px] border-line-brand bg-transparent px-6 py-[15px] font-sans text-[15.5px] leading-none font-semibold whitespace-nowrap text-ink transition-colors hover:border-slate-body active:translate-y-px"
-          >
-            View all services
-          </a>
+        <div className="max-w-[720px]">
+          <span className="eyebrow">What we do</span>
+          <h2 className="mt-4 mb-[14px] font-display text-[clamp(30px,3.6vw,44px)] leading-[1.06] font-extrabold tracking-[-0.02em] text-ink">
+            Everything your facility needs, under one roof
+          </h2>
+          <p className="text-[19px] leading-[1.6] text-slate-body">
+            From day-to-day maintenance to ground-up construction, a single
+            source of accountability across every trade.
+          </p>
         </div>
 
         <div className="mt-[54px] grid grid-cols-1 gap-x-10 gap-y-9 min-[620px]:grid-cols-2 min-[1000px]:grid-cols-4">

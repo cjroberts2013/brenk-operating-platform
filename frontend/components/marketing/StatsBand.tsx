@@ -14,7 +14,7 @@ export function StatsBand() {
   return (
     <section className="mt-[78px] bg-navy py-16 text-white">
       <div className="mx-auto w-full max-w-[1200px] px-5 sm:px-8">
-        <div className="grid grid-cols-2 gap-x-3 gap-y-[26px] min-[620px]:gap-y-3 min-[1000px]:grid-cols-4">
+        <div className="grid grid-cols-1 gap-x-3 gap-y-[26px] min-[620px]:grid-cols-3 min-[620px]:gap-y-3">
           {STATS.map((s, i) => (
             <div
               key={s.label}

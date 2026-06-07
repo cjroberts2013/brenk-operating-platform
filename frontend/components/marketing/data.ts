@@ -90,60 +90,64 @@ export const SERVICE_GROUPS: readonly ServiceGroup[] = [
     slug: 'doors',
     title: 'Doors & Openings',
     items: [
-      'Overhead & dock doors',
+      'Roll-up & overhead doors',
+      'Dock doors & operators',
       'Automatic doors',
       'Glass & storefront',
+      'Windows & emergency board-up',
       'Locks & hardware',
-      'Gates & access',
     ],
   },
   {
     slug: 'exterior',
     title: 'Exterior & Grounds',
     items: [
-      'Landscaping',
-      'Irrigation',
-      'Snow & ice removal',
+      'Fencing install & repair',
+      'Gate operators & access',
       'Parking lot & striping',
       'Pressure washing',
-      'Pest control',
+      'Graffiti removal',
+      'Landscaping & grounds',
     ],
   },
   {
     slug: 'construction',
     title: 'Construction & Remodel',
     items: [
-      'Tenant build-out',
-      'Remodels',
-      'New construction',
-      'Painting',
-      'Flooring',
-      'Roofing',
+      'Tenant build-out & remodels',
+      'Sheetrock, texture & paint',
+      'Flooring & carpet',
+      'Roofing & leak repair',
+      'Gutters & water management',
+      'Concrete repair',
     ],
   },
   {
     slug: 'general',
     title: 'General Maintenance',
     items: [
-      'Handyman services',
-      'Drywall & ceilings',
-      'Carpentry',
-      'Janitorial coordination',
+      'Handyman & carpentry',
+      'Welding & metal fabrication',
+      'Major appliance repair',
+      'Commercial cleanup & debris haul-off',
       '24/7 emergency repair',
     ],
   },
 ] as const
 
 // =============================================================
-// Stats band — credibility at a glance.
-// Placeholder figures pending Daryl confirming real numbers.
+// Stats band — credibility at a glance. Years-in-business is
+// derived from the founding year so it stays current on each
+// build instead of going stale.
 // =============================================================
 
+const FOUNDED_YEAR = 2007
+const yearsInBusiness = new Date().getFullYear() - FOUNDED_YEAR
+
 export const STATS = [
-  { num: '35+', label: 'Years in business' },
-  { num: '1,200+', label: 'Facilities served' },
+  { num: `${yearsInBusiness}+`, label: 'Years in business' },
+  { num: '180+', label: 'Facilities served' },
   { num: '24/7', label: 'Emergency response' },
-  { num: '98%', label: 'Client retention' },
 ] as const
 
 export const CREDENTIALS = [
@@ -154,17 +158,18 @@ export const CREDENTIALS = [
 ] as const
 
 // =============================================================
-// Logo cloud — placeholder client names.
-// Replace with real grayscale logos when Daryl provides them.
+// Logo cloud — real client logos (served facilities). Files live
+// in frontend/public. cubesmart.svg is the clean vector; the
+// others are raster (jpeg/webp) and may need transparent SVG/PNG
+// versions for a fully uniform strip.
 // =============================================================
 
-export const CLIENT_LOGOS = [
-  'CLIENT LOGO',
-  'CLIENT LOGO',
-  'CLIENT LOGO',
-  'CLIENT LOGO',
-  'CLIENT LOGO',
-  'CLIENT LOGO',
+export type ClientLogo = { src: string; alt: string }
+
+export const CLIENT_LOGOS: readonly ClientLogo[] = [
+  { src: '/images/cubesmart.svg', alt: 'CubeSmart' },
+  { src: '/images/extraspace.jpeg', alt: 'Extra Space Storage' },
+  { src: '/images/sleepinn.webp', alt: 'Sleep Inn' },
 ] as const
 
 // =============================================================
@@ -182,11 +187,6 @@ export const VALUE_PROPS: readonly ValueProp[] = [
     iconKey: 'cluster',
     title: 'One vendor, every trade',
     body: 'Stop juggling a dozen contractors. One contract, one invoice, one team accountable for your whole facility.',
-  },
-  {
-    iconKey: 'clock',
-    title: 'Rapid emergency response',
-    body: 'A live 24/7 dispatch line and crews on call, so most emergencies are on-site in under two hours.',
   },
   {
     iconKey: 'shield',
@@ -302,18 +302,15 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
   {
     heading: 'Company',
     links: [
-      { label: 'About / Our Story', href: '#' },
+      { label: 'About / Our Story', href: '/about' },
       { label: 'Projects', href: '/#projects' },
       { label: 'Certifications & Safety', href: '/#certs' },
-      { label: 'Service Areas', href: '#' },
-      { label: 'Careers', href: '#' },
     ],
   },
   {
     heading: 'Get in touch',
     links: [
       { label: 'Request a Quote', href: '/quote' },
-      { label: '24/7 Emergency Line', href: EMERGENCY_PHONE_HREF },
       { label: EMERGENCY_PHONE, href: EMERGENCY_PHONE_HREF },
       {
         label: 'daryl@brenkfacilityservices.com',
@@ -331,7 +328,21 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
 export const NAV_LINKS: readonly FooterLink[] = [
   { label: 'Services', href: '/#services' },
   { label: 'Projects', href: '/#projects' },
-  { label: 'Service Areas', href: '#' },
   { label: 'Certifications', href: '/#certs' },
-  { label: 'About', href: '#' },
+  { label: 'About', href: '/about' },
 ] as const
+
+// =============================================================
+// About page content. Real copy from Brenk's prior site; used
+// directly for now (not yet wired to the DB editor).
+// =============================================================
+
+export const ABOUT = {
+  eyebrow: 'Company values',
+  heading: 'Quality service and exceptional customer care.',
+  paragraphs: [
+    'Welcome to Brenk Facility Services! We are a family-owned and operated facility services company based in Austin, TX. Since 2007, we have been dedicated to providing our clients with the highest quality construction services, personalized attention, and unwavering commitment to their satisfaction.',
+    'Our company was founded by Daryl Brenk, who saw a need for reliable and trustworthy facility services in the community. Daryl believed that businesses deserved more than just a work order and invoice; they needed a partner who understood their unique needs and could provide customized solutions.',
+    'Daryl started Brenk Facility Services with just a few clients and a lot of hard work. Over the years, the company has grown steadily, now servicing over 180 facilities thanks to our reputation for quality service and exceptional customer care.',
+  ],
+} as const

@@ -58,11 +58,7 @@ export function Hero({
             </div>
 
             <div className="mt-[28px] flex flex-wrap gap-[18px] font-mono-brand text-[12.5px] tracking-[0.04em] text-slate-body uppercase">
-              {[
-                'One vendor, every trade',
-                '< 2 hr emergency response',
-                'Single point of contact',
-              ].map((t) => (
+              {['One vendor, every trade', 'Single point of contact'].map((t) => (
                 <span key={t} className="inline-flex items-center gap-2">
                   <span aria-hidden className="block size-[6px] rounded-full bg-signal" />
                   {t}
@@ -72,14 +68,16 @@ export function Hero({
           </div>
 
           {/* Media column — just the photo. The original design
-           * overlaid a "<2 hr average emergency response time" stat
-           * card here; Charles removed it 2026-05-28 so the hero
-           * image reads cleaner. The assurance row below the CTAs
-           * still surfaces the same "< 2 hr emergency response"
-           * line, so the message isn't lost. */}
+           * overlaid an emergency-response stat card here; removed so
+           * the hero image reads cleaner. */}
           <div className="relative">
-            <div className="photo-ph aspect-[4/3.4]">
-              <span className="photo-cap">Crew servicing rooftop HVAC unit</span>
+            <div className="aspect-[4/3.4] overflow-hidden rounded-lg border border-line-brand">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/hero.jpg"
+                alt="Brenk crew servicing a rooftop HVAC unit"
+                className="h-full w-full object-cover"
+              />
             </div>
           </div>
         </div>

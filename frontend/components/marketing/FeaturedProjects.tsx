@@ -9,26 +9,16 @@
  */
 
 import { PROJECTS } from './data'
-import { ArrowRightIcon } from './icons'
 
 export function FeaturedProjects() {
   return (
     <section id="projects" className="py-24">
       <div className="mx-auto w-full max-w-[1200px] px-5 sm:px-8">
-        <div className="flex flex-wrap items-end justify-between gap-6">
-          <div className="max-w-[720px]">
-            <span className="eyebrow">Recent work</span>
-            <h2 className="mt-4 mb-[14px] font-display text-[clamp(30px,3.6vw,44px)] leading-[1.06] font-extrabold tracking-[-0.02em] text-ink">
-              Proof in the field
-            </h2>
-          </div>
-          <a
-            href="#"
-            className="group inline-flex items-center gap-[7px] text-[15.5px] font-semibold text-signal"
-          >
-            All projects
-            <ArrowRightIcon className="size-[18px] transition-transform group-hover:translate-x-[3px]" />
-          </a>
+        <div className="max-w-[720px]">
+          <span className="eyebrow">Recent work</span>
+          <h2 className="mt-4 mb-[14px] font-display text-[clamp(30px,3.6vw,44px)] leading-[1.06] font-extrabold tracking-[-0.02em] text-ink">
+            Proof in the field
+          </h2>
         </div>
 
         <div className="mt-[52px] grid grid-cols-1 gap-6 min-[1000px]:grid-cols-3">
