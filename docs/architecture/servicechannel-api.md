@@ -267,13 +267,157 @@ gated by OAuth scope at runtime, but with the schema in hand we can
 build the auto-sync logic now and just point it at the endpoint once
 scope is granted. Schema and mapping captured in the next section.
 
-**`POST /invoices` — not attempted.** Sandbox data is real-shaped
-(per CLAUDE.md confidentiality note) and creating a test invoice
-would muddy CubeSmart's actual SC state. Holding until we either:
+**`POST /invoices` — not attempted (2026-05-25).** Sandbox data is
+real-shaped (per CLAUDE.md confidentiality note) and creating a test
+invoice would muddy CubeSmart's actual SC state. Holding until we either:
 
 1. Find an SC test-WO Daryl agrees to use as a guinea pig, or
 2. Get the documented JSON schema for the POST body from SC support
    without trial-and-error.
+
+> **Update 2026-06-10:** both resolved. We probed `POST /v3/invoices`
+> *safely* (a bogus, nonexistent WoIdentifier so nothing could be
+> created) purely to read the error class, and got the full payload
+> schema from SC's developer guide. **Write scope is confirmed.** See
+> "Spike results — 2026-06-10" just below.
+
+### Spike results — 2026-06-10 (write scope CONFIRMED + full payload)
+
+Re-ran the reads and ran the write-scope check via the new re-runnable
+script `backend/scripts/probe_sc_invoices.py`, and read the full SC
+developer guide (developer.servicechannel.com/guides/invoices).
+
+**Write scope CONFIRMED (sandbox).** `POST /v3/invoices` with a bogus
+`WoIdentifier` ("000000000") returned **`400 {"ErrorCode":917,
+"ErrorMessage":"Invalid Tracking Number"}`** — a content/validation
+error, NOT the `401`/code-504 "security permissions" error. SC
+authorized the write and only rejected the deliberately-nonexistent WO.
+So our partner-API password-grant token **can POST invoices**; the
+invoice push itself is *not* blocked. (Sandbox only; confirm prod scope
+separately before shipping, since prod is a different SC app with its own
+permission config.)
+
+Follow-up with a **real WO** (351182931) plus a deliberately-bad invoice
+number (a dash, to make creation impossible) returned **`400 code 1180
+"Invoice Number is not correct: Only alphanumeric characters are
+allowed"`**, i.e. it got *past* tracking-number validation to the
+number-format gate. So a real WO is accepted and the `^\w*$` rule is
+enforced exactly as the config says. The only things between us and a
+`201 Created` are a valid alphanumeric `InvoiceNumber`, `InvoiceText`
+(resolution), and `InvoiceTotal` <= NTE. We have NOT created a real
+invoice (SC invoices are only voidable via the UI); that needs a
+throwaway/test WO Daryl blesses.
+
+**Read retest unchanged.** `InvoiceRequirements` / `InvoiceRejectionReasons`
+/ `statistics` still ✓. `GET /v3/odata/invoices` still **401 code 504
+"security permissions"** — the auto-derive-paid sync is now the ONLY
+gated piece. The manual "Mark paid" button stays until that read scope
+is granted.
+
+**Eligibility (from the guide's About Invoices):** an invoice can be
+created only when WO status is **Completed or Completed/Confirmed** —
+exactly our `ready_to_invoice` stage. The Invoices queue's "Ready to
+mark up" + "Marked up" tabs are precisely the SC-eligible WOs.
+
+**Two invoice types (subscriber-configured):** **Standard** (labor /
+travel / material / freight totals, no labor/material breakdown) vs
+**Line Item** (same charges plus itemized `Labors[]` / `Materials[]`).
+
+#### POST /v3/invoices — full field reference (SC dev guide, USA path)
+
+```jsonc
+{
+  "InvoiceNumber": "string",      // REQUIRED, unique
+  "WoIdentifier": "string",       // REQUIRED, WO# (sc_number)
+  "InvoiceText": "string",        // resolution; REQUIRED if subscriber RequireResolutionText
+  "InvoiceTotal": 0,              // REQUIRED; must be <= WO NTE
+  "InvoiceTax": 0,                // optional
+  "InvoiceAmountsDetails": {
+    "LaborAmount": 0,             // = sum(Labors.Amount) when Labors present
+    "MaterialAmount": 0,          // = sum(Materials.Amount) when Materials present
+    "TravelAmount": 0, "FreightAmount": 0,
+    "OtherAmount": 0,
+    "OtherDescription": "..."     // enum: Discount | Management Fee | Markup |
+                                  //   Overhead & Profit | Rental Fee |
+                                  //   Subcontractor Cost | Shipping & Handling
+  },
+  // Line Item only — itemized arrays:
+  "Labors": [
+    { "SkillLevel": "1|2|3",      // 1 Supervisor, 2 Technician, 3 Helper
+      "LaborType": "1|2|3",       // 1 Regular, 2 Overtime, 3 Double time
+      "NumOfTech": "n", "HourlyRate": 0, "Hours": 0, "Amount": 0 }
+  ],
+  "Materials": [
+    { "Description": "str(<=100)", "PartNum": "str", "UnitType": "1..7",
+      "UnitPrice": 0, "Quantity": 0, "Amount": 0 }
+  ]
+}
+```
+Non-US/Canada additionally requires `InvoiceTaxesDetails`
+(Labor/Material/Travel/Freight/OtherTax); Canada adds `Tax2Details`
+(Tax2Amount, Tax2Name: VAT/HST/PST/QST). Brenk is USA — neither needed.
+Response: **201 Created** with `{"Id": <newInvoiceId>}`.
+
+#### CubeSmart's live InvoiceRequirements (subscriber 2014917186, pulled 2026-06-10)
+
+| Setting | Value | Implication |
+|---|---|---|
+| `RequireResolutionText` | **true** | `InvoiceText` required; block submit if `work_orders.resolution` empty. |
+| Number `Pattern` | **`^\w*$`** (Alphanumeric Only) | Letters/digits/underscore only — **no dashes/spaces**. e.g. `BRENK12345`, not `BRENK-12345`. |
+| `ReuseInvoiceNumber` | 0 (No) | Numbers must be unique; AutoGenerationType 0 = we generate it. |
+| `DaysBeforePostingDate` / `MaxDaysAfterPostingDate` | 1 / 1 | Tight submit window around completion. |
+| `IsInvoiceNegativeFeatureEnabled` | false | Positives only (markup helper enforces). |
+| `IsProviderAbleToAddSalesTax` | true | May set `InvoiceTax` if needed. |
+| `LaborCategoryIds` / `MaterialsCategoryIds` | `[10188,10191,10192,10193,10194,11454,13583]` | WOs whose SC category is in these lists **require a Line Item** invoice; others can be Standard. Type selection is per-WO. |
+
+#### Brenk mapping notes
+- Vendor cost + markup % are **confidential** and never sent. We submit
+  the **marked-up, client-facing** `InvoiceTotal` and the marked-up
+  `LaborAmount`/`MaterialAmount` split. Do NOT itemize via
+  `OtherDescription: "Markup"`/`"Subcontractor Cost"` (exposes margin).
+- **Line-item wrinkle (confirmed with a real WO):** sandbox WO
+  `351182931` is `COMPLETED/CONFIRMED`, NTE `$250`, `sc_category_id =
+  10192` — which is in CubeSmart's `LaborCategoryIds` AND
+  `MaterialsCategoryIds`, so it **requires a Line Item invoice** with
+  itemized `Labors[]` and `Materials[]`. A Standard totals-only body
+  would be rejected. Brenk pays subs a flat amount and doesn't track
+  tech hours/rates, so we need a convention (e.g. one labor line: 1
+  tech, 1 hr, `HourlyRate` = marked-up labor) or to confirm with Daryl
+  which of these categories he actually invoices.
+
+#### Worked Line Item payload (the body we validated, did NOT submit)
+
+For a category-gated WO like `351182931`, the submit body looks like:
+
+```jsonc
+{
+  "InvoiceNumber": "BRENK<unique alphanumeric>",   // ^\w*$, unique
+  "WoIdentifier": "351182931",
+  "InvoiceText": "<resolution text>",              // required
+  "InvoiceTotal": 100,                             // <= NTE (250)
+  "InvoiceTax": 0,
+  "InvoiceAmountsDetails": { "LaborAmount": 60, "MaterialAmount": 40 },
+  "Labors":    [{ "SkillLevel":"2","LaborType":"1","NumOfTech":"1","HourlyRate":60,"Hours":1,"Amount":60 }],
+  "Materials": [{ "Description":"...","PartNum":"...","UnitType":"1","UnitPrice":40,"Quantity":1,"Amount":40 }]
+}
+```
+Constraints verified against the docs/config: `sum(Labors.Amount) ==
+LaborAmount`, `sum(Materials.Amount) == MaterialAmount`,
+`LaborAmount + MaterialAmount + ... + InvoiceTax == InvoiceTotal`,
+`InvoiceTotal <= NTE`, number matches `^\w*$` and is unique.
+
+**Live create intentionally NOT performed (2026-06-10).** We validated
+the write path to the field level (authorized; real WO accepted; number
+rule enforced) but deliberately did not POST a fully-valid body, because
+SC invoices can only be voided via the web portal, not the API, so a
+test invoice would linger in CubeSmart's sandbox state. The path is
+proven enough to build against; an actual `201` can wait for the real
+feature (or a throwaway test WO).
+
+**Net Phase 1.5 status:** the submit path is fully specced AND
+write-authorized (sandbox). The only remaining gate is the
+`/v3/odata/invoices` READ scope for auto-paid sync. Re-runnable probe:
+`python backend/scripts/probe_sc_invoices.py .env 2014917186 [post]`.
 
 ### Blocked on SC support engagement
 
@@ -445,6 +589,12 @@ SC actually use? The schema example is just `"string"` — real values
 TBD on first successful read.
 
 ### Auto-sync architecture — webhook-driven (revised 2026-05-25)
+
+> **Build spec (2026-06-10):** the sections below are the research that
+> fed it; the implementation-ready spec lives in
+> `docs/architecture/sc-invoice-webhook-sync.md` (receiver + Procrastinate
+> worker + schema + `work_orders` integration + backfill + rollout). Start
+> there when implementing.
 
 Original plan was hourly polling of `/v3/odata/invoices`. Then
 Charles found SC's **Integration → WebHooks** admin page, which
@@ -794,9 +944,13 @@ exception path rather than the default.
 
 - ✅ POST /v3/invoices request schema — captured.
 - ✅ GET /v3/odata/invoices response schema — captured.
-- ❌ Actual access to `/v3/odata/invoices` (401 today).
-- ❌ Confirmation that our current OAuth grant permits writes
-  (`POST /v3/invoices`). Untested.
+- ❌ Actual access to `/v3/odata/invoices` (still 401 on 2026-06-10) —
+  the one remaining gate, needed only for auto-paid status sync.
+- ✅ **Confirmation that our current account permits writes
+  (`POST /v3/invoices`) — CONFIRMED 2026-06-10** (returned `400 Invalid
+  Tracking Number`, not 401). Our SC user CAN submit invoices in
+  sandbox. See "Spike results — 2026-06-10" above. (Confirm prod
+  separately before shipping.)
 
 **Important reframing (2026-05-25 from the SC auth docs at
 <https://developer.servicechannel.com/basics/general/authentication/>):**
@@ -1119,8 +1273,11 @@ browser). Options, in order of preference:
 2. Our existing SC username/password works against a Workforce-specific
    OAuth/token endpoint we don't yet know. (Do **not** brute-force
    this against prod — ask SC for the endpoint.)
-3. Fallback: no API → keep Brenk-native assignment as source of truth;
-   optionally a manual/CSV path. Least desirable.
+3. Fallback: token-harvest via a headless-browser login (capture the
+   Workforce JWE token, then call the JSON API directly). Full design
+   in `docs/architecture/sc-workforce-assignment-sync.md`. Build this
+   ONLY if SC declines the API ask — it carries ToS, fragility, and
+   maintenance risk. Last resort, but designed.
 
 Replaying the user's captured token is **not** an integration path —
 it's a short-lived, interactive-login JWE; useful only as the

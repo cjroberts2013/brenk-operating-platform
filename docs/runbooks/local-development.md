@@ -4,11 +4,13 @@ Step-by-step from a fresh clone to a running local environment.
 
 ## Prerequisites
 
-- Python 3.12 or later
-- Node 20 or later (for the frontend, added in Week 4)
-- A Supabase project with the database URL ready
+- Python 3.13 (the target version — don't drift)
+- Node 20 or later (for the frontend)
+- A Supabase project with the database URL ready (use `Brenk Dev`)
 - ServiceChannel sandbox credentials (client ID, secret, username, password)
-- `flyctl` CLI installed (for deployment later)
+- `flyctl` CLI installed (for production ops — see
+  `docs/runbooks/production-deployment.md`)
+- `vercel` CLI installed (for production frontend ops)
 - `git` and a code editor
 
 ## 1. Clone and Open

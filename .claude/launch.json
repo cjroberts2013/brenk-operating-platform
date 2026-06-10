@@ -1,0 +1,32 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd frontend && export PATH=\"$HOME/.nvm/versions/node/v22.22.3/bin:$PATH\" && npm run dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "worker",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd backend && .venv/bin/procrastinate --app=app.workers.app worker"
+      ],
+      "port": 0
+    }
+  ]
+}

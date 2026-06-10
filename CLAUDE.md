@@ -212,6 +212,31 @@ stays public and the dashboard stays locked.
   editor or re-seed; prod DB still has the old anchor).
 - Optional: DMARC TXT record at GoDaddy for sender reputation.
 
+**Completed (2026-06-06):**
+- **Everything above deployed to prod.** Backend redeployed to Fly
+  (`alembic upgrade head` applied the RLS + vendor-notified migrations,
+  shipped the reports/quote endpoints); frontend deployed to Vercel
+  (storefront, `/about`, `/quote`, reports, dev-only tabs). Quote-email
+  prod to-dos resolved: Fly Resend secrets set, prod `hero_cta_link`
+  set to `/quote`, sending live to Daryl.
+- **Security: Supabase `rls_disabled_in_public` advisor closed.** RLS
+  enabled on all public tables via migration (backend role is
+  `postgres`/`bypassrls`, so unaffected) AND the Supabase Data API
+  disabled on both dev + prod projects (we use a direct Postgres
+  connection + FastAPI, never PostgREST). Vercel project Root Directory
+  was also set to `frontend` (the git-push build was failing without it).
+- **Marketing storefront refinement pass** (all live): real services
+  list; new `/about` page (family photo, wired into nav + footer); hero
+  uses the rooftop-HVAC photo; logo cloud shows real client logos
+  (CubeSmart/Extra Space/Sleep Inn), larger + full-color; stats band
+  shows derived years-in-business + 180+ facilities (dropped client
+  retention); removed dead/placeholder CTAs and links (View all
+  services, All projects, Call the 24/7 line, emergency-response lines,
+  Service Areas, Careers, Privacy/Terms); left-aligned the value-props
+  header; images consolidated under `frontend/public/images/`.
+- Dev-server configs saved to `.claude/launch.json` (frontend +
+  backend + worker) for `preview_start`.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)
@@ -337,6 +362,59 @@ and storefront are all live at `app.brenkfacilityservices.com` /
 of it**, then closing out the small Phase 1 polish items, then
 deciding between Phase 1.5 (SC invoice push) and Phase 2 (QuickBooks).
 
+### WO detail view refinement (requested 2026-06-06, next UX focus)
+
+The work-order detail page right rail (Workflow checklist + Markup
+helper) feels cluttered and the whole view can overwhelm. Goal: make
+it easier to follow, surfacing the right thing at the right time.
+Collapsible sections are on the table but shouldn't hide the next
+action. Suggestions to explore (decide with Charles, ideally validate
+with Daryl):
+
+1. **Lead with the single next action.** Derive the current stage and
+   show one prominent "Next: assign a sub-vendor" CTA at the top, so
+   the user doesn't scan the whole 10-stage checklist to know what to
+   do. The full checklist becomes secondary.
+2. **Compact the Workflow.** Collapse the SC-auto/no-signal stages
+   (Accepted, Dispatch confirmed, Work complete, Closed by store,
+   Invoiced, Vendor-on-site) into a one-line summary, and keep only the
+   Brenk-actionable stages expanded (assign, notify, ready-to-invoice,
+   markup, paid). Or replace the tall vertical list with a compact
+   horizontal stepper at the top of the page.
+3. **Make the Markup helper context-aware.** Collapse it by default and
+   auto-expand only when the WO reaches "ready to invoice." Showing the
+   full cost/markup form on a WO nowhere near invoicing is most of the
+   clutter.
+4. **Collapsible sections** (the requested idea) as the mechanism for
+   #2/#3, but paired with smart defaults so the next action is never
+   behind a click.
+5. **Optional layout shift:** a full-width progress strip at the top +
+   a lighter right rail that shows only the contextually-relevant card.
+
+Recommendation: combine 1 + 2 + 3 (prominent next-action, summarized
+SC stages, context-aware markup helper); collapsible is a good tool but
+lean on smart defaults over manual expand/collapse.
+
+### Vendor notification: context + path to automation (captured 2026-06-06)
+
+Today "Mark notified" is just a timestamp — Daryl texts/calls the
+sub-vendor himself, then records it. The next-step card now shows the
+vendor's preferred contact method (from the vendor record) to make that
+manual reach-out faster. Two follow-ups to move toward Phase 3
+(Twilio auto-texting):
+
+- **Reminder: ask Daryl what he actually sends a vendor** when he
+  reaches out (WO #, location/store, trade, problem description, access
+  notes, NTE?, scheduling?, anything else). If we can pin down a clear,
+  constrained message shape, the notify step can be **fully automated**
+  (send the text via Twilio on assign/notify, log delivery + reply).
+- **Manual "additional context" field on the WO.** A Brenk-internal
+  free-text field where Daryl can add context the SC description lacks
+  (e.g., gate code, "call the GM first", parking). Useful immediately
+  on the detail view, and it becomes part of the auto-message payload
+  once Phase 3 automation lands. New column + edit control; mirrors the
+  other Brenk-internal WO fields.
+
 1. **Daryl onboarding.** Sit with him, sign him in, watch him use it.
    Goals: confirm the UX matches his mental model, capture the first
    round of "this is wrong" / "this is missing" feedback, get the
@@ -386,8 +464,22 @@ deciding between Phase 1.5 (SC invoice push) and Phase 2 (QuickBooks).
    confirmed; spike plan + read endpoints (for upfront validation
    and auto-deriving Sent/Approved/Paid state) documented in
    `docs/architecture/servicechannel-api.md` → "Invoice endpoints
-   — Phase 1.5 anchor". Blocked on the SC permissions question
-   captured in the SC webhooks + Contractor Request Form docs.
+   — Phase 1.5 anchor". **Write scope CONFIRMED 2026-06-10** — a
+   safe `POST /v3/invoices` probe (bogus WO) returned `400 Invalid
+   Tracking Number`, not a permissions error, so our SC account CAN
+   submit invoices (sandbox; confirm prod before shipping). The full
+   payload schema + CubeSmart's live requirements (resolution
+   required, `^\w*$` alphanumeric number, per-WO Standard vs Line
+   Item) are captured in the doc's "Spike results — 2026-06-10". The
+   submit path is buildable now; the ONLY remaining gate is the
+   `/v3/odata/invoices` READ permission for auto-paid status sync
+   (still 401). Re-runnable probe:
+   `backend/scripts/probe_sc_invoices.py`. **Read-back is solved a
+   different way:** since the OData read is blocked, invoice state
+   (Open→Approved→Paid→Void) comes via **webhooks**. Build-ready spec
+   in `docs/architecture/sc-invoice-webhook-sync.md` (FastAPI receiver
+   + Procrastinate worker + schema + `work_orders` integration +
+   UI-export backfill). This is the next concrete Phase 1.5 build.
 6. **Phase 2: QuickBooks Integration & Invoice Automation.** The
    bigger next investment. Scope: pull/push invoices to QBO so
    Sue's clipboard goes away end-to-end. Not started — kick off
@@ -571,12 +663,15 @@ step 5 of the build order.
 
 **Phase 1.5** (small follow-on, after SC write-API exploration):
 - "Accept" / "Decline" buttons from our app write to SC
-- **Invoice line items push to SC** — `POST /invoices`. Endpoint
-  confirmed to exist; spike plan + adjacent read endpoints (for
-  validation upfront + auto-derive Sent/Approved/Paid state) live
-  in `docs/architecture/servicechannel-api.md` → "Invoice endpoints
-  — Phase 1.5 anchor". Once shipped, replaces the manual "Daryl
-  types the total into SC's invoice form" step.
+- **Invoice line items push to SC** — `POST /invoices`. Endpoint +
+  full payload schema confirmed, and **write access confirmed
+  2026-06-10** (our SC account can POST; the only remaining gate is
+  the `/v3/odata/invoices` read for auto-paid sync). Spike plan +
+  adjacent read endpoints + CubeSmart's live requirements live in
+  `docs/architecture/servicechannel-api.md` → "Invoice endpoints —
+  Phase 1.5 anchor" / "Spike results — 2026-06-10". Once shipped,
+  replaces the manual "Daryl types the total into SC's invoice form"
+  step.
 - Status change writes (limited — most stages SC computes itself)
 
 **Phase 2:** Email integration — parse SC's emails, proactively
