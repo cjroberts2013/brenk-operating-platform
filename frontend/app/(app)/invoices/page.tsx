@@ -56,12 +56,6 @@ export default async function InvoicesPage({
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
           Invoices
         </h1>
-        <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
-          Sue&apos;s clipboard, online. Work orders flow through four stages —
-          confirmed by the store → priced by Daryl → invoiced in ServiceChannel
-          → paid by the client. Open a work order to set its markup; come back
-          here to track what&apos;s where.
-        </p>
       </header>
 
       <InvoiceTabsNav active={tab} counts={counts} />

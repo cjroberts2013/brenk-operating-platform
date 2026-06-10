@@ -60,6 +60,9 @@ export type WorkOrderSummary = {
   brenk_marked_up_at: string | null
   brenk_paid_at: string | null
   brenk_vendor_notified_at: string | null
+  /** Computed by the list endpoint: WO is past its stage's stuck
+   *  threshold (same definition the dashboard uses). */
+  is_stuck: boolean
 }
 
 export type WorkOrderDetail = {
@@ -198,6 +201,8 @@ export type WorkOrderListParams = {
   /** Invoice-queue tab filter — same source-of-truth as the backend
    *  `app/api/v1/endpoints/work_orders.py` invoice_tab param. */
   invoice_tab?: InvoiceTab
+  /** Only WOs stuck past their stage's age threshold. */
+  stuck?: boolean
   page?: number
   page_size?: number
 }

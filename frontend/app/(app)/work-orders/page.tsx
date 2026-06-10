@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { XMarkIcon } from '@heroicons/react/20/solid'
+import { ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/20/solid'
 
 import { Pagination } from '@/components/work-orders/Pagination'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
@@ -43,6 +43,27 @@ function stringParam(value: string | string[] | undefined): string | undefined {
   return raw && raw.length ? raw : undefined
 }
 
+function parseBool(value: string | string[] | undefined): boolean {
+  const raw = Array.isArray(value) ? value[0] : value
+  return raw === '1' || raw === 'true'
+}
+
+/** Build a /work-orders URL preserving the active filters. */
+function buildHref(params: {
+  status?: string
+  q?: string
+  stage?: string
+  stuck?: boolean
+}): string {
+  const p = new URLSearchParams()
+  if (params.status) p.set('status', params.status)
+  if (params.q) p.set('q', params.q)
+  if (params.stage) p.set('stage', params.stage)
+  if (params.stuck) p.set('stuck', '1')
+  const qs = p.toString()
+  return qs ? `/work-orders?${qs}` : '/work-orders'
+}
+
 export default async function WorkOrdersPage({
   searchParams,
 }: {
@@ -54,6 +75,7 @@ export default async function WorkOrdersPage({
   const status = stringParam(sp.status)
   const q = stringParam(sp.q)
   const stage = parseStage(sp.stage)
+  const stuck = parseBool(sp.stuck)
 
   // Fire list + sync-status in parallel; both are cheap and they're
   // independent of each other.
@@ -64,20 +86,16 @@ export default async function WorkOrdersPage({
       ...(status ? { status } : {}),
       ...(q ? { q } : {}),
       ...(stage ? { stage } : {}),
+      ...(stuck ? { stuck: true } : {}),
     }),
     getWorkOrderSyncStatus(),
   ])
 
-  // Build the URL the "× clear stage" link sends us to — same params
-  // as today minus the stage key (and page, since dropping a filter
-  // typically expands the result set and pagination becomes stale).
-  const clearStageHref = (() => {
-    const params = new URLSearchParams()
-    if (status) params.set('status', status)
-    if (q) params.set('q', q)
-    const qs = params.toString()
-    return qs ? `/work-orders?${qs}` : '/work-orders'
-  })()
+  // Dropping a filter expands the result set, so each "clear" link
+  // also resets pagination by omitting `page`.
+  const clearStageHref = buildHref({ status, q, stuck })
+  const clearStuckHref = buildHref({ status, q, stage })
+  const toggleStuckHref = buildHref({ status, q, stage, stuck: !stuck })
 
   return (
     <div className="space-y-6">
@@ -95,26 +113,53 @@ export default async function WorkOrdersPage({
               </>
             ) : null}
             {status ? <> · filtered to <strong>{status}</strong></> : null}
-            {q ? <> · matching <strong>“{q}”</strong></> : null} ·
+            {q ? <> · matching <strong>“{q}”</strong></> : null}
+            {stuck ? <> · <strong>stuck</strong> only</> : null} ·
             newest first
           </p>
         </div>
-        <StatusFilter current={status} />
+        <div className="flex items-center gap-2">
+          <Link
+            href={toggleStuckHref}
+            title={stuck ? 'Show all work orders' : 'Show only stalled work orders'}
+            className={
+              stuck
+                ? 'inline-flex items-center gap-1.5 rounded-md bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-800'
+                : 'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5'
+            }
+          >
+            <ExclamationTriangleIcon className="size-4" />
+            {stuck ? 'Showing stuck' : 'Stuck only'}
+          </Link>
+          <StatusFilter current={status} />
+        </div>
       </header>
 
-      {stage ? (
+      {stage || stuck ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Active filter:
+            Active filter{stage && stuck ? 's' : ''}:
           </span>
-          <Link
-            href={clearStageHref}
-            title="Clear stage filter"
-            className="group inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800"
-          >
-            Stage: {STAGE_LABELS[stage]}
-            <XMarkIcon className="size-3 text-indigo-400 transition group-hover:text-indigo-700 dark:text-indigo-500 dark:group-hover:text-indigo-300" />
-          </Link>
+          {stage ? (
+            <Link
+              href={clearStageHref}
+              title="Clear stage filter"
+              className="group inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800"
+            >
+              Stage: {STAGE_LABELS[stage]}
+              <XMarkIcon className="size-3 text-indigo-400 transition group-hover:text-indigo-700 dark:text-indigo-500 dark:group-hover:text-indigo-300" />
+            </Link>
+          ) : null}
+          {stuck ? (
+            <Link
+              href={clearStuckHref}
+              title="Clear stuck filter"
+              className="group inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-800"
+            >
+              Stuck only
+              <XMarkIcon className="size-3 text-red-400 transition group-hover:text-red-700 dark:text-red-500 dark:group-hover:text-red-300" />
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
@@ -122,7 +167,7 @@ export default async function WorkOrdersPage({
 
       <div className="overflow-hidden rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
         {data.items.length === 0 ? (
-          <EmptyState hasFilter={Boolean(status || q || stage)} />
+          <EmptyState hasFilter={Boolean(status || q || stage || stuck)} />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-white/10">
@@ -145,10 +190,18 @@ export default async function WorkOrdersPage({
                     className="hover:bg-gray-50 dark:hover:bg-gray-800/50"
                   >
                     <Td>
-                      <StatusBadge
-                        status={wo.primary_status}
-                        extended={wo.extended_status}
-                      />
+                      <div className="flex flex-col items-start gap-1">
+                        <StatusBadge
+                          status={wo.primary_status}
+                          extended={wo.extended_status}
+                        />
+                        {wo.is_stuck ? (
+                          <span className="inline-flex items-center gap-0.5 rounded-sm bg-red-50 px-1.5 py-px text-[10px] font-medium uppercase text-red-700 dark:bg-red-950/50 dark:text-red-400">
+                            <ExclamationTriangleIcon className="size-2.5" />
+                            Stuck
+                          </span>
+                        ) : null}
+                      </div>
                     </Td>
                     <Td>
                       <Link

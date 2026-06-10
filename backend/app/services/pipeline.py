@@ -46,7 +46,7 @@ sync — any edit to one needs a matching edit to the other.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import ColumnElement, and_, false, or_
 
@@ -201,6 +201,35 @@ def stage_filter_clauses(stage_key: str) -> list[ColumnElement[bool]]:
     if stage_key == "invoiced":
         return [WorkOrder.primary_status == "INVOICED"]
     return [false()]
+
+
+def stuck_filter_clause() -> ColumnElement[bool]:
+    """A single WHERE clause selecting WOs that are stuck in ANY stage.
+
+    "Stuck" = the WO is in a non-terminal stage AND its `sc_updated_date`
+    is older than that stage's `stuck_days` threshold. Built as an OR
+    over each stage's (stage clauses AND past-threshold) so it matches
+    exactly the same rows the dashboard would flag via `is_stuck()`.
+
+    Stages with `stuck_days is None` (terminal, e.g. invoiced) are
+    excluded. Returns `false()` if somehow no stage has a threshold.
+    """
+    now = datetime.now(UTC)
+    per_stage: list[ColumnElement[bool]] = []
+    for spec in STAGES:
+        if spec.stuck_days is None:
+            continue
+        cutoff = now - timedelta(days=spec.stuck_days)
+        per_stage.append(
+            and_(
+                *stage_filter_clauses(spec.key),
+                WorkOrder.sc_updated_date.is_not(None),
+                WorkOrder.sc_updated_date < cutoff,
+            )
+        )
+    if not per_stage:
+        return false()
+    return or_(*per_stage)
 
 
 def is_stuck(stage_key: str, sc_updated_date: datetime | None) -> bool:

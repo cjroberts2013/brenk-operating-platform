@@ -73,12 +73,25 @@ function formatAge(days: number | null): string {
   return `${Math.round(days)}d avg`
 }
 
+// The two billing-tail stages route to the purpose-built Invoices
+// worklist (money columns + markup/paid sub-states) instead of the
+// generic Work Orders table. They land on the most actionable tab; the
+// Invoices tab nav then shows the full per-tab breakdown of the tile's
+// count. Every earlier stage routes to the WO list filtered to it.
+const STAGE_HREFS: Record<string, string> = {
+  ready_to_invoice: '/invoices?tab=ready_to_markup',
+  invoiced: '/invoices?tab=sent',
+}
+
 export function PipelineStageTile({ stage }: { stage: PipelineStage }) {
   const colors = COLOR_CLASSES[stage.color]
+  const href =
+    STAGE_HREFS[stage.key] ??
+    `/work-orders?stage=${encodeURIComponent(stage.key)}`
 
   return (
     <Link
-      href={`/work-orders?stage=${encodeURIComponent(stage.key)}`}
+      href={href}
       className="group relative block overflow-hidden rounded-lg bg-white p-4 ring-1 ring-gray-200 transition hover:ring-gray-300 dark:bg-gray-900 dark:ring-white/10 dark:hover:ring-white/20"
     >
       {/* Top accent bar — same color language as SC status badges */}

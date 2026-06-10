@@ -33,6 +33,12 @@ export function StuckPanel({ items }: { items: StuckWorkOrder[] }) {
           {items.length} work order{items.length === 1 ? '' : 's'} overdue · most
           overdue first
         </span>
+        <Link
+          href="/work-orders?stuck=1"
+          className="ml-auto text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
+        >
+          View all in list
+        </Link>
       </header>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-white/10">

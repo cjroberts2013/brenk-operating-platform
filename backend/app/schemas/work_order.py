@@ -79,6 +79,12 @@ class WorkOrderSummary(_OrmModel):
     brenk_paid_at: datetime | None
     brenk_vendor_notified_at: datetime | None
 
+    # Computed by the list endpoint (not an ORM column): is this WO
+    # sitting in its stage past the dashboard's stuck threshold? Lets
+    # the list flag stalled rows inline. Defaults False; set per row
+    # after model_validate.
+    is_stuck: bool = False
+
 
 class WorkOrderDetail(_OrmModel):
     """Full work-order detail. Used by the single-WO endpoint."""

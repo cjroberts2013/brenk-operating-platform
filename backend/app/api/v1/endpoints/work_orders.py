@@ -24,7 +24,13 @@ from app.schemas.work_order import (
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
-from app.services.pipeline import STAGE_BY_KEY, stage_filter_clauses
+from app.services.pipeline import (
+    STAGE_BY_KEY,
+    classify,
+    is_stuck,
+    stage_filter_clauses,
+    stuck_filter_clause,
+)
 from app.services.sync.work_orders import sync_all_work_orders
 
 
@@ -156,6 +162,16 @@ async def list_work_orders(
             ),
         ),
     ] = None,
+    stuck: Annotated[
+        bool,
+        Query(
+            description=(
+                "If true, return only work orders that are stuck: in a "
+                "non-terminal stage past that stage's age threshold (same "
+                "definition the dashboard uses)."
+            ),
+        ),
+    ] = False,
     page: Annotated[int, Query(ge=1, description="1-indexed page number")] = 1,
     page_size: Annotated[
         int,
@@ -204,6 +220,11 @@ async def list_work_orders(
             filters.append(WorkOrder.brenk_paid_at.is_(None))
         elif invoice_tab == "paid":
             filters.append(WorkOrder.brenk_paid_at.is_not(None))
+
+    # Stuck filter: WOs sitting in any stage past its age threshold.
+    # Same source-of-truth thresholds as the dashboard's is_stuck().
+    if stuck:
+        filters.append(stuck_filter_clause())
 
     # Free-text search. We OR across columns the operator is likely to
     # type — WO number, SC purchase number, problem code, caller free
@@ -255,8 +276,21 @@ async def list_work_orders(
     stmt = _apply_filters(stmt)
     rows = (await db.execute(stmt)).scalars().all()
 
+    items: list[WorkOrderSummary] = []
+    for row in rows:
+        summary = WorkOrderSummary.model_validate(row)
+        # Tag each row with whether it's stuck so the list can flag it
+        # inline, using the same classify()/is_stuck() as the dashboard.
+        stage_key = classify(
+            row.primary_status,
+            row.extended_status,
+            row.assigned_vendor_id is not None,
+        )
+        summary.is_stuck = is_stuck(stage_key, row.sc_updated_date) if stage_key else False
+        items.append(summary)
+
     return WorkOrderListResponse(
-        items=[WorkOrderSummary.model_validate(row) for row in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
