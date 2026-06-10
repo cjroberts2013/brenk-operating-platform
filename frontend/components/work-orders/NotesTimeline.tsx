@@ -9,6 +9,8 @@
  * real human.
  */
 
+import { ChevronDownIcon } from '@heroicons/react/24/outline'
+
 import type { WorkOrderNoteRef } from '@/lib/api/types'
 import { relativeTime } from '@/lib/format'
 
@@ -25,7 +27,13 @@ function isSystemNote(note: WorkOrderNoteRef): boolean {
   return (note.note_type ?? '').toLowerCase() === 'systemnote'
 }
 
-export function NotesTimeline({ notes }: { notes: WorkOrderNoteRef[] }) {
+export function NotesTimeline({
+  notes,
+  defaultOpen = true,
+}: {
+  notes: WorkOrderNoteRef[]
+  defaultOpen?: boolean
+}) {
   if (notes.length === 0) {
     return (
       <div className="rounded-lg ring-1 ring-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400 dark:ring-white/10">
@@ -35,15 +43,21 @@ export function NotesTimeline({ notes }: { notes: WorkOrderNoteRef[] }) {
   }
 
   return (
-    <div className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
-      <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-          Notes
-        </h2>
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-          {notes.length} total, oldest first.
-        </p>
-      </header>
+    <details
+      open={defaultOpen}
+      className="group rounded-lg ring-1 ring-gray-200 dark:ring-white/10 [&_summary::-webkit-details-marker]:hidden"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 group-open:border-b group-open:border-gray-200 dark:group-open:border-white/10">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+            Notes
+          </h2>
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            {notes.length} total, oldest first.
+          </p>
+        </div>
+        <ChevronDownIcon className="size-4 shrink-0 text-gray-400 transition-transform group-open:rotate-180" />
+      </summary>
       <ul role="list" className="divide-y divide-gray-200 dark:divide-white/10">
         {notes.map((note) => (
           <li key={note.id} className="flex gap-3 px-4 py-3 text-sm">
@@ -69,13 +83,13 @@ export function NotesTimeline({ notes }: { notes: WorkOrderNoteRef[] }) {
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1 whitespace-pre-wrap text-gray-700 dark:text-gray-300">
+              <p className="mt-1 break-words whitespace-pre-wrap text-gray-700 dark:text-gray-300">
                 {stripHtml(note.note_data)}
               </p>
             </div>
           </li>
         ))}
       </ul>
-    </div>
+    </details>
   )
 }

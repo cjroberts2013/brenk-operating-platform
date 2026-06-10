@@ -6,6 +6,7 @@ import { ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/20/so
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
+import { NextStepCard } from '@/components/work-orders/NextStepCard'
 import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
 import { VendorNotifiedControl } from '@/components/work-orders/VendorNotifiedControl'
 import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
@@ -53,6 +54,23 @@ export default async function WorkOrderDetailPage({
   const locationLine = [wo.location?.store_id, wo.location?.name]
     .filter(Boolean)
     .join(' — ')
+
+  // Markup helper is only relevant once a WO is at/after "work complete"
+  // (or already has markup), and before it's paid. Auto-expand it then;
+  // keep it collapsed otherwise so it isn't clutter on early-stage WOs.
+  const p = (wo.primary_status || '').toUpperCase()
+  const markupOpen =
+    !wo.brenk_paid_at &&
+    (p.includes('COMPLETED') ||
+      p.includes('INVOICED') ||
+      wo.is_invoiced ||
+      wo.brenk_markup_percent !== null)
+
+  // Full record for the assigned vendor (the WO only embeds id/name),
+  // so the next-step card can show their preferred contact method.
+  const assignedVendor = wo.assigned_vendor
+    ? (activeVendors.items.find((v) => v.id === wo.assigned_vendor!.id) ?? null)
+    : null
 
   return (
     <div className="space-y-6">
@@ -155,8 +173,14 @@ export default async function WorkOrderDetailPage({
           <NotesTimeline notes={notes} />
         </div>
 
-        {/* Right rail: workflow + meta */}
+        {/* Right rail: next step + workflow + markup + meta */}
         <div className="space-y-6">
+          <NextStepCard
+            wo={wo}
+            scWebUrl={SC_WEB_URL}
+            vendorContact={assignedVendor}
+          />
+
           <WorkflowChecklist
             wo={wo}
             vendorControl={
@@ -175,7 +199,7 @@ export default async function WorkOrderDetailPage({
             }
           />
 
-          <MarkupHelper wo={wo} />
+          <MarkupHelper wo={wo} defaultOpen={markupOpen} />
 
           <section className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
             <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
