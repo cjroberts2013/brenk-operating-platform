@@ -381,15 +381,16 @@ export function MarkupHelper({
           </button>
         )}
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          Use this once the client has paid Brenk for this work. Moves the WO
-          to the{' '}
+          Use this once the client has paid Brenk for this work. When
+          ServiceChannel marks the invoice paid, this is set automatically;
+          the invoice shows as Paid on the{' '}
           <Link
-            href="/invoices?tab=paid"
+            href="/invoices"
             className="text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
           >
-            Paid
+            Invoices
           </Link>{' '}
-          tab.
+          page.
         </p>
       </div>
     </details>

@@ -7,6 +7,10 @@ import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
 import { NextStepCard } from '@/components/work-orders/NextStepCard'
+import {
+  BILLING_STEP_KINDS,
+  deriveNextStep,
+} from '@/components/work-orders/next-step'
 import { ScInvoiceCard } from '@/components/work-orders/ScInvoiceCard'
 import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
 import { VendorNotifiedControl } from '@/components/work-orders/VendorNotifiedControl'
@@ -70,16 +74,11 @@ export default async function WorkOrderDetailPage({
     .filter(Boolean)
     .join(' — ')
 
-  // Markup helper is only relevant once a WO is at/after "work complete"
-  // (or already has markup), and before it's paid. Auto-expand it then;
-  // keep it collapsed otherwise so it isn't clutter on early-stage WOs.
-  const p = (wo.primary_status || '').toUpperCase()
-  const markupOpen =
-    !wo.brenk_paid_at &&
-    (p.includes('COMPLETED') ||
-      p.includes('INVOICED') ||
-      wo.is_invoiced ||
-      wo.brenk_markup_percent !== null)
+  // Markup helper is only relevant while the next step is a billing
+  // step (price it / invoice it / mark paid). Auto-expand it then; keep
+  // it collapsed on early-stage, canceled, and fully-paid WOs so it
+  // isn't clutter. Same derivation as the Next-step card.
+  const markupOpen = BILLING_STEP_KINDS.has(deriveNextStep(wo).kind)
 
   // Full record for the assigned vendor (the WO only embeds id/name),
   // so the next-step card can show their preferred contact method.

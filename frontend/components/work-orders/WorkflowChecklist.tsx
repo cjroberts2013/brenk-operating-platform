@@ -1,10 +1,11 @@
 /**
  * Workflow checklist — derives the stage states for a work order.
  *
- * Stages that can be derived from SC data today show real status.
- * Brenk-internal stages (vendor texted, ready to invoice, markup
- * decided, etc.) show as "Not tracked yet" placeholders until the
- * vendor model and invoice queue ship.
+ * SC-owned stages derive from primary + extended status; Brenk-internal
+ * stages (sub-vendor assigned, vendor notified, markup decided, paid)
+ * derive from the Brenk columns on the WO. The only stage with no data
+ * source is "Vendor on-site" (CubeSmart app GPS — no signal to us until
+ * the SC Workforce token is unblocked).
  */
 
 import type { ReactNode } from 'react'
@@ -48,41 +49,43 @@ function isOpen(status: string): boolean {
 
 export function deriveStages(wo: WorkOrderDetail): Stage[] {
   const status = wo.primary_status
-  const extended = wo.extended_status ?? ''
-
-  const accepted: StageState = isOpen(status) ? 'pending' : 'done'
-  const dispatchConfirmed: StageState =
-    isInProgress(status) || isCompleted(status) || wo.is_invoiced
-      ? 'done'
-      : 'pending'
-
-  const subVendor: StageState = wo.assigned_vendor ? 'done' : 'not_tracked'
-
-  const workComplete: StageState = isCompleted(status) ? 'done' : 'pending'
-  const storeConfirmed: StageState =
-    isCompleted(status) && extended.toUpperCase().includes('CONFIRM')
-      ? 'done'
-      : 'pending'
-
-  const invoiced: StageState = wo.is_invoiced ? 'done' : 'pending'
+  const extended = (wo.extended_status ?? '').toUpperCase()
+  const invoiced = wo.is_invoiced || status.toUpperCase() === 'INVOICED'
+  // An invoiced WO has necessarily passed every SC stage before it,
+  // even though SC's primary status no longer says COMPLETED.
+  const completed = isCompleted(status) || invoiced
+  const storeConfirmed =
+    (isCompleted(status) && extended.includes('CONFIRM')) || invoiced
+  // Same definition as the backend's ready_to_invoice stage: completed
+  // and past PENDING CONFIRMATION (terminal CANCELED / NO CHARGE WOs
+  // shouldn't reach this card's happy path, but exclude them anyway).
+  const readyToInvoice =
+    (isCompleted(status) &&
+      !['PENDING CONFIRMATION', 'CANCELED', 'NO CHARGE'].includes(extended)) ||
+    invoiced
+  const hasMarkup = wo.brenk_markup_percent !== null
 
   return [
-    { label: 'Accepted', source: 'SC', state: accepted },
-    { label: 'Dispatch confirmed', source: 'SC', state: dispatchConfirmed },
+    {
+      label: 'Accepted',
+      source: 'SC',
+      state: isOpen(status) ? 'pending' : 'done',
+    },
+    {
+      label: 'Dispatch confirmed',
+      source: 'SC',
+      state: isInProgress(status) || completed ? 'done' : 'pending',
+    },
     {
       label: 'Sub-vendor assigned',
       source: 'Brenk',
-      state: subVendor,
-      detail:
-        wo.assigned_vendor?.name ??
-        (subVendor === 'not_tracked'
-          ? 'Vendors page lands next'
-          : 'Unassigned'),
+      state: wo.assigned_vendor ? 'done' : 'pending',
+      detail: wo.assigned_vendor?.name ?? 'Unassigned',
     },
     {
       label: 'Vendor notified',
       source: 'Brenk',
-      state: wo.brenk_vendor_notified_at ? 'done' : 'not_tracked',
+      state: wo.brenk_vendor_notified_at ? 'done' : 'pending',
       detail: wo.brenk_vendor_notified_at
         ? undefined
         : 'Mark when you’ve texted/called the vendor',
@@ -93,21 +96,39 @@ export function deriveStages(wo: WorkOrderDetail): Stage[] {
       state: 'not_tracked',
       detail: 'CubeSmart app data — no signal to us',
     },
-    { label: 'Work complete', source: 'SC', state: workComplete },
-    { label: 'Closed by store', source: 'SC', state: storeConfirmed },
+    {
+      label: 'Work complete',
+      source: 'SC',
+      state: completed ? 'done' : 'pending',
+    },
+    {
+      label: 'Closed by store',
+      source: 'SC',
+      state: storeConfirmed ? 'done' : 'pending',
+    },
     {
       label: 'Ready to invoice',
-      source: 'Brenk',
-      state: 'not_tracked',
-      detail: 'Invoice queue lands next',
+      source: 'SC',
+      state: readyToInvoice ? 'done' : 'pending',
+      detail: readyToInvoice ? undefined : 'Store confirmation moves it here',
     },
     {
       label: 'Markup decided',
       source: 'Brenk',
-      state: 'not_tracked',
-      detail: 'Invoice queue lands next',
+      state: hasMarkup ? 'done' : 'pending',
+      detail: hasMarkup
+        ? `${Number(wo.brenk_markup_percent).toFixed(0)}% markup`
+        : 'Set in the markup helper below',
     },
-    { label: 'Invoiced', source: 'SC', state: invoiced },
+    { label: 'Invoiced', source: 'SC', state: invoiced ? 'done' : 'pending' },
+    {
+      label: 'Paid',
+      source: 'Brenk',
+      state: wo.brenk_paid_at ? 'done' : 'pending',
+      detail: wo.brenk_paid_at
+        ? undefined
+        : 'Mark when the client pays Brenk',
+    },
   ]
 }
 
@@ -170,23 +191,17 @@ export function WorkflowChecklist({
             : isNotifiedStage
               ? notifyControl
               : null
-          // When the vendor control is present and the WO has someone
-          // assigned, mark that stage done regardless of what the static
-          // deriveStages logic returned. The notified stage already
-          // reflects its timestamp in deriveStages.
-          const effectiveState: StageState =
-            isVendorStage && wo.assigned_vendor ? 'done' : stage.state
           return (
             <li
               key={stage.label}
               className="flex items-start gap-3 px-4 py-2.5 text-sm"
             >
-              <StageIcon state={effectiveState} />
+              <StageIcon state={stage.state} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span
                     className={
-                      effectiveState === 'done'
+                      stage.state === 'done'
                         ? 'font-medium text-gray-900 dark:text-white'
                         : 'text-gray-500 dark:text-gray-400'
                     }

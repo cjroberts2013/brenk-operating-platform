@@ -28,6 +28,21 @@ function parseStage(
 
 type SearchParams = Record<string, string | string[] | undefined>
 
+/** Whether a sub-vendor should already be assigned at this WO's stage.
+ *  Pre-acceptance WOs don't need one yet, and terminal canceled /
+ *  no-charge WOs never will — only highlight "Unassigned" in red where
+ *  it's an actual gap (work dispatched, in flight, or billable). */
+function vendorExpected(wo: {
+  primary_status: string
+  extended_status: string | null
+}): boolean {
+  const p = wo.primary_status.toUpperCase()
+  const e = (wo.extended_status ?? '').toUpperCase()
+  if (p === 'IN PROGRESS') return e !== 'WAITING FOR APPROVAL'
+  if (p === 'COMPLETED') return e !== 'CANCELED' && e !== 'NO CHARGE'
+  return false
+}
+
 function parsePositiveInt(
   value: string | string[] | undefined,
   fallback: number,
@@ -177,6 +192,7 @@ export default async function WorkOrdersPage({
                   <Th>WO #</Th>
                   <Th>Location</Th>
                   <Th>Trade</Th>
+                  <Th>Vendor</Th>
                   <Th>Priority</Th>
                   <Th align="right">NTE</Th>
                   <Th>Scheduled</Th>
@@ -222,6 +238,24 @@ export default async function WorkOrdersPage({
                       ) : null}
                     </Td>
                     <Td>{wo.trade?.name ?? '—'}</Td>
+                    <Td>
+                      {wo.assigned_vendor ? (
+                        <Link
+                          href={`/vendors/${wo.assigned_vendor.id}`}
+                          className="text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-indigo-400"
+                        >
+                          {wo.assigned_vendor.name}
+                        </Link>
+                      ) : vendorExpected(wo) ? (
+                        <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                          Unassigned
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                          Unassigned
+                        </span>
+                      )}
+                    </Td>
                     <Td>{wo.priority ?? '—'}</Td>
                     <Td align="right">{money(wo.nte)}</Td>
                     <Td>{shortDate(wo.scheduled_date)}</Td>
