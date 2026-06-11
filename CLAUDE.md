@@ -476,10 +476,17 @@ manual reach-out faster. Two follow-ups to move toward Phase 3
    (still 401). Re-runnable probe:
    `backend/scripts/probe_sc_invoices.py`. **Read-back is solved a
    different way:** since the OData read is blocked, invoice state
-   (Open→Approved→Paid→Void) comes via **webhooks**. Build-ready spec
-   in `docs/architecture/sc-invoice-webhook-sync.md` (FastAPI receiver
-   + Procrastinate worker + schema + `work_orders` integration +
-   UI-export backfill). This is the next concrete Phase 1.5 build.
+   (Open→Approved→Paid→Void) comes via **webhooks**. The backend is
+   **BUILT (2026-06-10)**: 5 tables + receiver
+   (`POST /api/v1/webhooks/servicechannel`, HMAC-verified, auth-exempt)
+   + a periodic Procrastinate sweep that materializes invoices and
+   mirrors state onto `work_orders` (auto-populates `brenk_paid_at` on
+   `InvoicePaid`, so the Paid tab updates itself) + a `ScInvoiceCard`
+   on the WO detail page. 15 new tests pass. Full design + remaining
+   go-live steps (human SC webhook registration, tunnel smoke test,
+   backfill script, field-name confirmation) in
+   `docs/architecture/sc-invoice-webhook-sync.md` §12-13. The invoice
+   **submit** path is a separate, independently-buildable piece.
 6. **Phase 2: QuickBooks Integration & Invoice Automation.** The
    bigger next investment. Scope: pull/push invoices to QBO so
    Sue's clipboard goes away end-to-end. Not started — kick off

@@ -391,31 +391,56 @@ failure CSV produced; exits non-zero if >2% fail.
 
 ---
 
-## 12. Resume point — start here next session
+## 12. Build status — steps 1-3 DONE (2026-06-10)
 
-Nothing webhook-related is coded yet; this doc + the verified Phase 1.5
-findings are the whole state. The work itself has NOT started. First
-slice, in order:
+The backend feature is built and verified on dev. What landed:
 
-1. **Schema first.** Add the 5 SQLAlchemy models (§4) +
-   `alembic revision --autogenerate` (surrogate `id` PK + the two unique
-   indexes; enable RLS in the migration). Apply to dev.
-2. **Receiver endpoint** `POST /api/v1/webhooks/servicechannel` (§5.1):
-   raw-body read, HMAC verify (`hmac.compare_digest`), dedupe insert,
-   `defer` the worker job, 200. Auth-exempt. Unit-test the HMAC with a
-   self-vector + one-byte-mutation, and the ping/empty-body → 200 path.
-   **No worker logic yet** — just store the raw event.
-3. **Worker task** (§5.2) + the `work_orders` integration (§7) +
-   status-history, tested against SC sample-payload fixtures.
-4. **Then** the human SC setup (§2), tunnel smoke test (§9), and backfill
-   (§8).
+1. **Schema** ✅ — 5 models (`app/models/invoice.py`), migration
+   `2a505b1717a0` (RLS on all five, the expression unique index, partial
+   indexes), applied to dev, no drift.
+2. **Receiver** ✅ — `POST /api/v1/webhooks/servicechannel`
+   (`app/api/v1/endpoints/webhooks.py`), auth-exempt on the public
+   router. Raw-body HMAC verify (`app/services/sc_webhook.py`,
+   `hmac.compare_digest`), `sha256` dedupe insert, ping/reachability,
+   invalid-sig → 401 recorded. Config: `SC_WEBHOOK_SIGNING_KEY`. Tests:
+   4 HMAC unit + 4 endpoint integration.
+3. **Worker + integration** ✅ — `app/services/invoice_sync.py`
+   (`process_event` / `process_pending_events`): idempotent upsert,
+   out-of-order skip by `UpdatedDateDTO`, EventType-authoritative status,
+   empty-arrays-don't-wipe, status history, dead-letter on poison. Driven
+   by a **periodic Procrastinate sweep** every minute
+   (`sweep_webhook_events` in `app/workers/tasks.py`) plus a
+   `process_webhook_event(id)` task. `work_orders` integration: new
+   columns (`sc_invoice_id/number/status/submitted_at/last_error`,
+   `sc_paid_at`; migration `f7991cf106d2`) + a `ScInvoiceCard` readout on
+   the WO detail page. Tests: 7 integration covering all of the above.
 
-Blockers/inputs needed before going live (not before coding): CJ copies
-`SC_WEBHOOK_SIGNING_KEY` from the sandbox WebHooks page; decide the
-`brenk_paid_at` vs `sc_paid_at` model (§7) with Charles. None of these
-block starting steps 1–3 against fixtures.
+**Decisions made during the build:**
+- **Periodic sweep, not defer-on-receipt.** The web process doesn't open
+  a Procrastinate connector, and at ~8 WOs/day a 1-minute sweep is ample
+  and simpler. `process_webhook_event(id)` exists for a future
+  defer/manual path. Re-evaluate only if latency ever matters.
+- **`brenk_paid_at` vs `sc_paid_at`:** RESOLVED. `InvoicePaid` always
+  sets `sc_paid_at`, and ALSO populates `brenk_paid_at` when it's null,
+  so the existing Paid-tab / dashboard logic reflects auto-paid with no
+  query refactor. `brenk_paid_at` stays a manual override.
 
-Separately, this is unrelated to the **submit** path (which is already
-verified buildable — see `servicechannel-api.md` "Spike results
-2026-06-10"). Submit and webhook-read-back are two independent Phase 1.5
-pieces; either can be built first.
+## 13. Remaining to go live (not yet done)
+
+1. **[HUMAN] SC webhook registration** (§2): in Sandbox2 then Production,
+   copy `SC_WEBHOOK_SIGNING_KEY` (per env; `fly secrets set` for prod),
+   register the webhook + Invoice subscription, Ping, Activate.
+2. **Tunnel smoke test** in sandbox (§9): `cloudflared`/`ngrok` →
+   localhost:8000, then create a sandbox invoice and confirm a row
+   appears within ~30 s.
+3. **Backfill** (§8): build `backend/scripts/backfill_invoices.py` and run
+   it against a production UI export.
+4. **Field-name confirmation** (§11): the invoice `Object` field mapping
+   in `invoice_sync.py` was written defensively against the documented
+   shapes; confirm against a real sandbox `InvoiceCreated`/`InvoicePaid`
+   payload once webhooks are flowing and adjust the `_first(...)` keys if
+   needed.
+5. Alerts (§5.3) on invalid_signature / dead_letter / silence.
+
+Separately, the **submit** path (`servicechannel-api.md` "Spike results
+2026-06-10") is an independent Phase 1.5 piece, still buildable on its own.

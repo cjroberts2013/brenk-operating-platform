@@ -7,7 +7,9 @@ with ServiceChannel. Task bodies are thin wrappers — real logic lives in
 
 import structlog
 
+from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.services.invoice_sync import process_event, process_pending_events
 from app.services.servicechannel.client import ServiceChannelClient
 from app.services.sync.notes import sync_notes_for_sc_work_order_id
 from app.services.sync.vendors import sync_vendors_from_sc
@@ -63,6 +65,35 @@ async def sync_work_order_detail(sc_work_order_id: int) -> dict:
         count = await sync_notes_for_sc_work_order_id(session, client, sc_work_order_id)
         await session.commit()
     return {"sc_work_order_id": sc_work_order_id, "notes_synced": count}
+
+
+@procrastinate_app.periodic(cron="* * * * *")
+@procrastinate_app.task(name="sweep_webhook_events", queue="default")
+async def sweep_webhook_events(timestamp: int) -> dict:
+    """Process any pending SC webhook events into invoice state.
+
+    Runs every minute. The receiver stores raw events fast and returns
+    200; this is where the real materialization happens (idempotent +
+    out-of-order safe, in `app.services.invoice_sync`). At Brenk's
+    volume a 1-minute cadence is ample; it also serves as the
+    at-least-once safety net for anything the receiver couldn't enqueue.
+
+    `timestamp` is the Procrastinate scheduled tick (used for logging).
+    """
+    settings = get_settings()
+    async with AsyncSessionLocal() as session:
+        counts = await process_pending_events(session, sc_env=settings.SC_ENVIRONMENT)
+    return counts
+
+
+@procrastinate_app.task(name="process_webhook_event", queue="default")
+async def process_webhook_event(event_id: int) -> dict:
+    """Process a single webhook event by id. Available for a future
+    defer-on-receipt path and for manual reprocessing."""
+    settings = get_settings()
+    async with AsyncSessionLocal() as session:
+        result = await process_event(session, event_id, sc_env=settings.SC_ENVIRONMENT)
+    return {"event_id": event_id, "status": result}
 
 
 @procrastinate_app.task(name="sync_vendors", queue="default")

@@ -116,6 +116,14 @@ export type WorkOrderDetail = {
   brenk_paid_at: string | null
   brenk_vendor_notified_at: string | null
 
+  // ServiceChannel invoice state, synced from SC invoice webhooks.
+  sc_invoice_id: number | null
+  sc_invoice_number: string | null
+  sc_invoice_status: string | null
+  sc_invoice_submitted_at: string | null
+  sc_invoice_last_error: string | null
+  sc_paid_at: string | null
+
   notes_count: number
   attachments_count: number
 

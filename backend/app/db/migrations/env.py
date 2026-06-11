@@ -15,6 +15,8 @@ from app.db.base import Base
 # Import all models so they're registered on Base.metadata before autogenerate runs.
 # Add new model modules here as they're created.
 from app.models import (  # noqa: F401
+    invoice,
+    storefront,
     work_order,
 )
 

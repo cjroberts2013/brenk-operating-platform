@@ -281,6 +281,22 @@ class WorkOrder(Base, TimestampMixin):
     # mode. Null = not yet notified. SC has no equivalent.
     brenk_vendor_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # ServiceChannel invoice state, synced from SC invoice webhooks
+    # (see docs/architecture/sc-invoice-webhook-sync.md). These let the
+    # invoice queue derive Sent -> Approved -> Paid from SC instead of
+    # relying solely on the manual "Mark paid" button.
+    sc_invoice_id: Mapped[int | None] = mapped_column(BigInteger)
+    sc_invoice_number: Mapped[str | None] = mapped_column(String(100))
+    sc_invoice_status: Mapped[str | None] = mapped_column(String(40))
+    sc_invoice_submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    sc_invoice_last_error: Mapped[str | None] = mapped_column(Text)
+    # SC-derived paid timestamp (from an InvoicePaid event). brenk_paid_at
+    # stays the manual override; we also populate it from here when it's
+    # empty so the existing Paid-tab/queue logic works without a refactor.
+    sc_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Sync metadata
     raw_data: Mapped[dict | None] = mapped_column(JSONB)
     last_synced_at: Mapped[datetime] = mapped_column(

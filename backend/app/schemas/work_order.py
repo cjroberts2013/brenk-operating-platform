@@ -148,6 +148,14 @@ class WorkOrderDetail(_OrmModel):
     brenk_paid_at: datetime | None
     brenk_vendor_notified_at: datetime | None
 
+    # ServiceChannel invoice state, synced from SC invoice webhooks.
+    sc_invoice_id: int | None
+    sc_invoice_number: str | None
+    sc_invoice_status: str | None
+    sc_invoice_submitted_at: datetime | None
+    sc_invoice_last_error: str | None
+    sc_paid_at: datetime | None
+
     notes_count: int
     attachments_count: int
 

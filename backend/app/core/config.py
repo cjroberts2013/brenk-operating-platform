@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     SC_PASSWORD: str
     SC_REQUEST_TIMEOUT_SECONDS: int = 30
     SC_MAX_RETRIES: int = 3
+    # Signing key from the SC Provider Automation WebHooks page (per env).
+    # Used to verify inbound webhook HMAC signatures. Empty until set;
+    # an empty key makes every signature fail closed (see sc_webhook.py).
+    SC_WEBHOOK_SIGNING_KEY: str = ""
 
     @computed_field
     @property

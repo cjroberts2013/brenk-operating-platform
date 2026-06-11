@@ -7,7 +7,15 @@ deployment health probes.
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.endpoints import dashboard, reports, storefront, trades, vendors, work_orders
+from app.api.v1.endpoints import (
+    dashboard,
+    reports,
+    storefront,
+    trades,
+    vendors,
+    webhooks,
+    work_orders,
+)
 from app.core.auth import get_current_user
 
 # Authenticated routes — every request needs a valid Supabase JWT.
@@ -25,4 +33,8 @@ api_router.include_router(storefront.admin_router, prefix="/storefront", tags=["
 public_router = APIRouter()
 public_router.include_router(
     storefront.public_router, prefix="/storefront", tags=["storefront-public"]
+)
+# SC webhook receiver — authenticity is the HMAC signature, not a JWT.
+public_router.include_router(
+    webhooks.router, prefix="/webhooks", tags=["webhooks"]
 )

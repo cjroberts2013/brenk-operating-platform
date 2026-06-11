@@ -7,6 +7,7 @@ import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
 import { NextStepCard } from '@/components/work-orders/NextStepCard'
+import { ScInvoiceCard } from '@/components/work-orders/ScInvoiceCard'
 import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
 import { VendorNotifiedControl } from '@/components/work-orders/VendorNotifiedControl'
 import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
@@ -200,6 +201,8 @@ export default async function WorkOrderDetailPage({
           />
 
           <MarkupHelper wo={wo} defaultOpen={markupOpen} />
+
+          <ScInvoiceCard wo={wo} />
 
           <section className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
             <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
