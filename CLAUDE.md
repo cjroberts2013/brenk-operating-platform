@@ -237,6 +237,33 @@ stays public and the dashboard stays locked.
 - Dev-server configs saved to `.claude/launch.json` (frontend +
   backend + worker) for `preview_start`.
 
+**Completed (2026-06-10, dashboard-flow review):**
+- **Stage-derivation bug fixes** (commit `d31f311`): `deriveNextStep`
+  and the WO-detail Workflow checklist now read `extended_status`
+  (canceled/no-charge WOs no longer told "Set the markup"; PENDING
+  CONFIRMATION says "Waiting on the store"; WAITING FOR APPROVAL routes
+  to accept-in-SC), stale "Invoice queue lands next" placeholders
+  replaced with real derivations + a Paid milestone row, dead
+  `/invoices?tab=paid` link removed, and the WO list gained the
+  planned Vendor column (red "Unassigned" only where a vendor should
+  exist). Known remaining seam: stage logic now lives in THREE places
+  (backend `pipeline.py`, frontend `next-step.ts`, frontend
+  `WorkflowChecklist.tsx`) — unifying by exposing `stage_key` +
+  next-step from the API is the agreed follow-up.
+- **Dashboard dollar stat band** (commit `3bb0387`): three tiles above
+  the funnel — Unbilled work (priced exact + NTE ceiling for unpriced),
+  Awaiting payment (webhook-synced SC invoices only; reads $0 in prod
+  until Phase 1.5 webhook registration/backfill land; legacy
+  pre-webhook INVOICED WOs deliberately excluded as noise), Paid in
+  <month> with profit (America/Chicago month boundary). Pure
+  aggregation service `app/services/money.py` (15 unit tests), served
+  in the existing `/dashboard/pipeline` payload.
+- Review backlog not yet done: stuck-clock false positives
+  (`is_stuck` keyed to `sc_updated_date`; use GREATEST with Brenk
+  timestamps), Dispatched-tile breakdown by assigned/notified,
+  receivables aging (invoiced-but-unpaid > 30d), stage chip in WO
+  list rows, stalest-first default sort.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)
