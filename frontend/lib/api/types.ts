@@ -63,6 +63,51 @@ export type WorkOrderSummary = {
   /** Computed by the list endpoint: WO is past its stage's stuck
    *  threshold (same definition the dashboard uses). */
   is_stuck: boolean
+  // SC invoice state synced from webhooks (for the post-submit tabs).
+  sc_invoice_number: string | null
+  sc_invoice_status: string | null
+  sc_invoice_total: string | null
+  sc_invoice_submitted_at: string | null
+  sc_invoice_last_error: string | null
+  sc_paid_at: string | null
+}
+
+/** A ServiceChannel invoice record, synced from SC invoice webhooks. */
+export type InvoiceSummary = {
+  sc_invoice_id: number | null
+  invoice_number: string
+  status: string | null
+  currency: string | null
+  subtotal: string | null
+  invoice_tax: string | null
+  invoice_total: string | null
+  approval_code: string | null
+  batch_number: string | null
+  comments: string | null
+  trade: string | null
+  category: string | null
+  invoice_date: string | null
+  posted_date: string | null
+  approved_date: string | null
+  paid_date: string | null
+  last_action_date: string | null
+  sc_updated_date: string | null
+  source: string
+}
+
+/** An actual SC invoice plus its linked work order (for the invoice list). */
+export type InvoiceListItem = InvoiceSummary & {
+  work_order_id: number | null
+  wo_number: string | null
+  location_name: string | null
+  location_store_id: string | null
+}
+
+export type InvoiceListResponse = {
+  items: InvoiceListItem[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export type WorkOrderDetail = {
@@ -120,9 +165,12 @@ export type WorkOrderDetail = {
   sc_invoice_id: number | null
   sc_invoice_number: string | null
   sc_invoice_status: string | null
+  sc_invoice_total: string | null
   sc_invoice_submitted_at: string | null
   sc_invoice_last_error: string | null
   sc_paid_at: string | null
+  /** Full linked SC invoice record(s), latest first. */
+  sc_invoices: InvoiceSummary[]
 
   notes_count: number
   attachments_count: number
@@ -132,12 +180,18 @@ export type WorkOrderDetail = {
   updated_at: string
 }
 
-export type InvoiceTab = 'ready_to_markup' | 'marked_up' | 'sent' | 'paid'
+export type InvoiceTab =
+  | 'ready_to_markup'
+  | 'marked_up'
+  | 'sent'
+  | 'rejected'
+  | 'paid'
 
 export const INVOICE_TAB_LABELS: Record<InvoiceTab, string> = {
   ready_to_markup: 'Ready to mark up',
   marked_up: 'Marked up, ready to send',
   sent: 'Sent',
+  rejected: 'Rejected',
   paid: 'Paid',
 }
 
@@ -146,12 +200,13 @@ export const INVOICE_TAB_LABELS: Record<InvoiceTab, string> = {
  *  and what action moves a row to the next tab. */
 export const INVOICE_TAB_HELP: Record<InvoiceTab, string> = {
   ready_to_markup:
-    "Work orders the store has confirmed and that haven't been priced yet. Open a work order, enter what the vendor charged Brenk, set the markup, and it moves to “Marked up, ready to send.” These numbers stay private to Brenk — they're never sent to ServiceChannel.",
+    "Work orders the store has confirmed and that haven't been priced yet. Open a work order, enter what the vendor charged Brenk, set the markup, and it moves to “Marked up, ready to send.” These numbers stay private to Brenk; they're never sent to ServiceChannel.",
   marked_up:
-    'Priced and ready to invoice in ServiceChannel. The total bill shown is Brenk\'s — only Daryl enters the final amount into SC\'s invoice form. After SC processes the invoice, the next sync will move the WO into “Sent.”',
-  sent:
-    'Submitted to ServiceChannel and awaiting payment. When the client pays Brenk, click “Mark paid” on the WO to move it to the Paid tab.',
-  paid: 'Closed out. Kept for historical reference — every paid job, with the vendor cost + markup Brenk used.',
+    "Priced and ready to invoice in ServiceChannel. The total bill shown is Brenk's; only Daryl enters the final amount into SC's invoice form. Once the invoice appears in SC, the webhook moves the WO into “Sent” on its own.",
+  sent: 'Submitted to ServiceChannel and awaiting payment, synced live from SC. When SC marks it paid (or you Mark paid on the WO), it moves to the Paid tab.',
+  rejected:
+    'ServiceChannel rejected the invoice. Open the WO to see the reason, fix it, and resubmit in SC; the webhook updates the status from there.',
+  paid: 'Closed out. Kept for reference: every paid job, with the SC invoice plus the vendor cost + markup Brenk used.',
 }
 
 export type WorkOrderListResponse = {

@@ -15,13 +15,25 @@ type ColumnKey =
   | 'sent_at'
   | 'paid_at'
   | 'updated'
+  | 'sc_invoice'
+  | 'sc_status'
+  | 'sc_total'
+  | 'sc_error'
 
 const COLUMNS_BY_TAB: Record<InvoiceTab, ColumnKey[]> = {
   ready_to_markup: ['vendor', 'vendor_cost', 'updated'],
   marked_up: ['vendor', 'vendor_cost', 'markup', 'total_bill', 'marked_up_at'],
-  sent: ['vendor', 'vendor_cost', 'markup', 'total_bill', 'sent_at'],
-  paid: ['vendor', 'markup', 'total_bill', 'paid_at'],
+  // Post-submit tabs lead with the real SC invoice (synced from webhooks).
+  sent: ['vendor', 'sc_invoice', 'sc_status', 'sc_total', 'sent_at'],
+  rejected: ['vendor', 'sc_invoice', 'sc_status', 'sc_error'],
+  paid: ['vendor', 'sc_invoice', 'sc_total', 'paid_at'],
 }
+
+const RIGHT_ALIGNED: ReadonlySet<ColumnKey> = new Set([
+  'vendor_cost',
+  'total_bill',
+  'sc_total',
+])
 
 const COLUMN_LABELS: Record<ColumnKey, string> = {
   vendor: 'Vendor',
@@ -29,9 +41,20 @@ const COLUMN_LABELS: Record<ColumnKey, string> = {
   markup: 'Markup',
   total_bill: 'Total bill',
   marked_up_at: 'Marked up',
-  sent_at: 'Sent',
+  sent_at: 'Submitted',
   paid_at: 'Paid',
   updated: 'Updated',
+  sc_invoice: 'Invoice #',
+  sc_status: 'SC status',
+  sc_total: 'Billed',
+  sc_error: 'Reason',
+}
+
+const SC_STATUS_TONE: Record<string, string> = {
+  Paid: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+  Approved: 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300',
+  Rejected: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300',
+  Void: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
 }
 
 /** Sum of labor + material costs Brenk owes the vendor. Either may
@@ -120,11 +143,46 @@ function CellValue({
     case 'marked_up_at':
       return <>{relativeTime(wo.brenk_marked_up_at)}</>
     case 'sent_at':
-      return <>{relativeTime(wo.sc_updated_date)}</>
+      return <>{relativeTime(wo.sc_invoice_submitted_at ?? wo.sc_updated_date)}</>
     case 'paid_at':
-      return <>{shortDate(wo.brenk_paid_at)}</>
+      return <>{shortDate(wo.sc_paid_at ?? wo.brenk_paid_at)}</>
     case 'updated':
       return <>{relativeTime(wo.sc_updated_date)}</>
+    case 'sc_invoice':
+      return wo.sc_invoice_number ? (
+        <span className="font-medium text-gray-900 dark:text-white">
+          {wo.sc_invoice_number}
+        </span>
+      ) : (
+        <span className="text-gray-400">—</span>
+      )
+    case 'sc_status':
+      return wo.sc_invoice_status ? (
+        <span
+          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+            SC_STATUS_TONE[wo.sc_invoice_status] ??
+            'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
+          }`}
+        >
+          {wo.sc_invoice_status}
+        </span>
+      ) : (
+        <span className="text-gray-400">—</span>
+      )
+    case 'sc_total':
+      return (
+        <span className="font-medium text-gray-900 dark:text-white">
+          {wo.sc_invoice_total ? money(wo.sc_invoice_total) : '—'}
+        </span>
+      )
+    case 'sc_error':
+      return wo.sc_invoice_last_error ? (
+        <span className="text-xs text-red-700 dark:text-red-300">
+          {wo.sc_invoice_last_error}
+        </span>
+      ) : (
+        <span className="text-gray-400">—</span>
+      )
   }
 }
 
@@ -155,7 +213,7 @@ export function InvoiceQueueTable({
               <Th>Location</Th>
               <Th>Trade</Th>
               {columns.map((c) => (
-                <Th key={c} align={c === 'vendor_cost' || c === 'total_bill' ? 'right' : 'left'}>
+                <Th key={c} align={RIGHT_ALIGNED.has(c) ? 'right' : 'left'}>
                   {COLUMN_LABELS[c]}
                 </Th>
               ))}
@@ -169,7 +227,7 @@ export function InvoiceQueueTable({
               >
                 <Td>
                   <Link
-                    href={`/work-orders/${wo.id}`}
+                    href={`/work-orders/${wo.id}?from=invoices`}
                     className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
                   >
                     {wo.sc_number}
@@ -189,7 +247,7 @@ export function InvoiceQueueTable({
                 {columns.map((c) => (
                   <Td
                     key={c}
-                    align={c === 'vendor_cost' || c === 'total_bill' ? 'right' : 'left'}
+                    align={RIGHT_ALIGNED.has(c) ? 'right' : 'left'}
                   >
                     <CellValue column={c} wo={wo} />
                   </Td>

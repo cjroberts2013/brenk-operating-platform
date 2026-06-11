@@ -232,7 +232,7 @@ export function WorkOrderCalendar({
                           return (
                             <li key={wo.id}>
                               <Link
-                                href={`/work-orders/${wo.id}`}
+                                href={`/work-orders/${wo.id}?from=vendors`}
                                 className="group/event flex items-center gap-1.5"
                                 title={`#${wo.sc_number} · ${wo.primary_status}${wo.extended_status ? ` / ${wo.extended_status}` : ''}`}
                               >
@@ -319,7 +319,7 @@ export function WorkOrderCalendar({
               return (
                 <li key={wo.id} className="px-4 py-2 text-sm">
                   <Link
-                    href={`/work-orders/${wo.id}`}
+                    href={`/work-orders/${wo.id}?from=vendors`}
                     className="flex items-center gap-2 text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-indigo-400"
                   >
                     <span

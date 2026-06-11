@@ -310,7 +310,7 @@ async def _apply_invoice_event(
 
         await _sync_work_order(
             db, sc_env, event_type, obj, wo_tracking, sc_invoice_id,
-            invoice_number, status, ev_time,
+            invoice_number, status, invoice.invoice_total, ev_time,
         )
 
     # Status history: always append (even for stale/late events) for audit.
@@ -388,6 +388,7 @@ async def _sync_work_order(
     sc_invoice_id: int | None,
     invoice_number: str,
     status: str | None,
+    invoice_total: Decimal | None,
     ev_time: datetime | None,
 ) -> None:
     """Mirror invoice state onto the matching work order, so the invoice
@@ -407,6 +408,8 @@ async def _sync_work_order(
     wo.sc_invoice_number = invoice_number
     if status is not None:
         wo.sc_invoice_status = status
+    if invoice_total is not None:
+        wo.sc_invoice_total = invoice_total
 
     if event_type in ("InvoiceCreated", "InvoiceOpen") and wo.sc_invoice_submitted_at is None:
         wo.sc_invoice_submitted_at = (

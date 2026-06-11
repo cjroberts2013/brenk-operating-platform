@@ -23,12 +23,26 @@ const SC_WEB_URL =
   process.env.NEXT_PUBLIC_SC_WEB_URL?.replace(/\/$/, '') ??
   'https://sb2.servicechannel.com'
 
+// Where the "Back" link returns to, keyed by the `?from=` marker the
+// linking page passes. Defaults to the Work Orders list.
+const BACK_TARGETS: Record<string, { href: string; label: string }> = {
+  invoices: { href: '/invoices', label: 'Back to Invoices' },
+  vendors: { href: '/vendors', label: 'Back to Vendors' },
+  dashboard: { href: '/', label: 'Back to Dashboard' },
+}
+const DEFAULT_BACK = { href: '/work-orders', label: 'Back to Work Orders' }
+
 export default async function WorkOrderDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { id: idStr } = await params
+  const sp = await searchParams
+  const fromParam = typeof sp.from === 'string' ? sp.from : undefined
+  const back = (fromParam && BACK_TARGETS[fromParam]) || DEFAULT_BACK
   const id = Number(idStr)
   if (!Number.isFinite(id) || id < 1) notFound()
 
@@ -76,11 +90,11 @@ export default async function WorkOrderDetailPage({
   return (
     <div className="space-y-6">
       <Link
-        href="/work-orders"
+        href={back.href}
         className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
       >
         <ArrowLeftIcon className="size-4" />
-        Back to Work Orders
+        {back.label}
       </Link>
 
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -202,7 +216,7 @@ export default async function WorkOrderDetailPage({
 
           <MarkupHelper wo={wo} defaultOpen={markupOpen} />
 
-          <ScInvoiceCard wo={wo} />
+          <ScInvoiceCard wo={wo} scWebUrl={SC_WEB_URL} />
 
           <section className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
             <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">

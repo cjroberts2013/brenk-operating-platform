@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.v1.endpoints import (
     dashboard,
+    invoices,
     reports,
     storefront,
     trades,
@@ -21,6 +22,7 @@ from app.core.auth import get_current_user
 # Authenticated routes — every request needs a valid Supabase JWT.
 api_router = APIRouter(dependencies=[Depends(get_current_user)])
 api_router.include_router(work_orders.router, prefix="/work-orders", tags=["work-orders"])
+api_router.include_router(invoices.router, prefix="/invoices", tags=["invoices"])
 api_router.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
 api_router.include_router(trades.router, prefix="/trades", tags=["trades"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])

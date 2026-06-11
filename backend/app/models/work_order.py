@@ -288,6 +288,9 @@ class WorkOrder(Base, TimestampMixin):
     sc_invoice_id: Mapped[int | None] = mapped_column(BigInteger)
     sc_invoice_number: Mapped[str | None] = mapped_column(String(100))
     sc_invoice_status: Mapped[str | None] = mapped_column(String(40))
+    # Amount actually invoiced to the client per SC (vs Brenk's internal
+    # computed total). Synced from the invoice's InvoiceTotal.
+    sc_invoice_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     sc_invoice_submitted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )

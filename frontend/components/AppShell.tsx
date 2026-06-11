@@ -85,7 +85,14 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`)
 }
 
-function SidebarContents({ pathname }: { pathname: string }) {
+function SidebarContents({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string
+  /** Called when a nav item is tapped. Used on mobile to close the drawer. */
+  onNavigate?: () => void
+}) {
   return (
     <nav className="flex flex-1 flex-col">
       <ul role="list" className="flex flex-1 flex-col gap-y-7">
@@ -97,6 +104,7 @@ function SidebarContents({ pathname }: { pathname: string }) {
                 <li key={item.name}>
                   <Link
                     href={item.href}
+                    onClick={onNavigate}
                     aria-current={active ? 'page' : undefined}
                     className={classNames(
                       active
@@ -116,6 +124,7 @@ function SidebarContents({ pathname }: { pathname: string }) {
         <li className="mt-auto">
           <Link
             href="/settings"
+            onClick={onNavigate}
             aria-current={isActive(pathname, '/settings') ? 'page' : undefined}
             className={classNames(
               isActive(pathname, '/settings')
@@ -191,7 +200,10 @@ export default function AppShell({
                 <LogoMark />
               </div>
               <div className="relative flex flex-1 flex-col">
-                <SidebarContents pathname={pathname} />
+                <SidebarContents
+                  pathname={pathname}
+                  onNavigate={() => setSidebarOpen(false)}
+                />
               </div>
             </div>
           </DialogPanel>

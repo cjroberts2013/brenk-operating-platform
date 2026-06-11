@@ -303,6 +303,30 @@ This is what turns an invoice store into the Phase 1.5 read-back loop.
   the manual "Mark paid" button becomes an override rather than the only
   signal — closing the loop the blocked OData read was meant to close.
 
+### 7a. Invoices tab wiring — DONE (2026-06-10)
+
+The `/invoices` tabs now derive from the synced invoice state rather than
+inferring from `primary_status`:
+
+- **Tab filters** (`work_orders.py` `invoice_tab`) rewritten NULL-safely:
+  `sent` = an active `sc_invoice_status` (Open/Approved/On Hold/Reviewed/
+  Disputed) and not paid; `paid` = `sc_invoice_status=Paid` or
+  `sc_paid_at`/`brenk_paid_at`; **new `rejected`** tab =
+  `sc_invoice_status=Rejected`. Voided invoices fall back to "Marked up" /
+  "Ready to mark up". Legacy fallback: `primary_status=INVOICED` with no
+  synced status still counts as `sent`. Each WO lands in exactly one tab
+  (covered by `tests/integration/test_invoice_tabs.py`).
+- **`work_orders.sc_invoice_total`** added (migration `93c84ffb76c3`),
+  synced from the invoice's `InvoiceTotal`.
+- **`WorkOrderSummary`** exposes `sc_invoice_number/status/total/
+  submitted_at/last_error/sc_paid_at`; the invoice queue table shows the
+  real invoice number, an SC status badge, the billed total, and dates on
+  the post-submit tabs. Rejected rows show the reason.
+- **WO detail** returns the full linked invoice record(s) as
+  `sc_invoices: InvoiceSummary[]` (latest first); the `ScInvoiceCard`
+  renders amounts + lifecycle dates + approval code and links into SC to
+  void/manage. WO-centric model (one row per WO, latest invoice shown).
+
 ---
 
 ## 8. Backfill (one-time) — `backend/scripts/backfill_invoices.py`

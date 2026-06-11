@@ -12,13 +12,15 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_async_db
+from app.models.invoice import Invoice
 from app.models.work_order import Client, Location, Vendor, WorkOrder, WorkOrderNote
 from app.schemas.work_order import (
+    InvoiceSummary,
     WorkOrderDetail,
     WorkOrderListResponse,
     WorkOrderNoteRef,
@@ -112,6 +114,10 @@ router = APIRouter()
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
 
+# SC invoice statuses that mean an invoice is live but not yet paid/terminal.
+# Drives the "Sent" invoice tab. Terminal states (Paid/Void/Rejected) excluded.
+_ACTIVE_INVOICE_STATUSES = ["Open", "Approved", "On Hold", "Reviewed", "Disputed"]
+
 
 @router.get("/", response_model=WorkOrderListResponse)
 async def list_work_orders(
@@ -152,13 +158,16 @@ async def list_work_orders(
         ),
     ] = None,
     invoice_tab: Annotated[
-        Literal["ready_to_markup", "marked_up", "sent", "paid"] | None,
+        Literal["ready_to_markup", "marked_up", "sent", "rejected", "paid"] | None,
         Query(
             description=(
-                "Invoice-queue tab filter. ready_to_markup: stage=ready_to_invoice "
-                "with no markup set. marked_up: stage=ready_to_invoice with markup "
-                "set, not yet sent. sent: primary_status=INVOICED, not paid. paid: "
-                "brenk_paid_at is set."
+                "Invoice-queue tab filter. Post-submit tabs derive from the "
+                "synced SC invoice state (sc_invoice_status), falling back to "
+                "primary_status=INVOICED for WOs invoiced before webhooks. "
+                "ready_to_markup / marked_up: ready_to_invoice stage with no "
+                "active SC invoice. sent: an active SC invoice, not paid. "
+                "rejected: sc_invoice_status=Rejected. paid: paid by SC or marked "
+                "paid in our app."
             ),
         ),
     ] = None,
@@ -205,21 +214,63 @@ async def list_work_orders(
             )
         filters.extend(stage_filter_clauses(stage))
 
-    # Invoice-queue tab filters. Each tab is a composite of pipeline
-    # stage + Brenk-internal markup/paid state. Mapping is the single
-    # source of truth shared with the frontend tab labels.
+    # Invoice-queue tab filters. The post-submit tabs derive from the
+    # SC invoice state synced via webhooks (work_orders.sc_invoice_*),
+    # with a fallback to primary_status=INVOICED for WOs invoiced before
+    # webhooks. Conditions are written NULL-safely so each WO lands in
+    # exactly one tab. Shared single source of truth with the frontend.
     if invoice_tab is not None:
+        # Paid: by SC, or marked paid in our app (manual override).
+        paid_cond = or_(
+            WorkOrder.brenk_paid_at.is_not(None),
+            WorkOrder.sc_paid_at.is_not(None),
+            WorkOrder.sc_invoice_status == "Paid",
+        )
+        not_paid = and_(
+            WorkOrder.brenk_paid_at.is_(None),
+            WorkOrder.sc_paid_at.is_(None),
+            WorkOrder.sc_invoice_status.is_distinct_from("Paid"),
+        )
+        # An active (non-terminal) SC invoice exists for this WO.
+        active_invoice = or_(
+            WorkOrder.sc_invoice_status.in_(_ACTIVE_INVOICE_STATUSES),
+            and_(  # legacy: invoiced in SC before webhook sync existed
+                WorkOrder.primary_status == "INVOICED",
+                WorkOrder.sc_invoice_status.is_(None),
+            ),
+        )
+        # No active/terminal SC invoice blocking re-invoicing (NULL-safe).
+        no_open_invoice = and_(
+            or_(
+                WorkOrder.sc_invoice_status.is_(None),
+                WorkOrder.sc_invoice_status.notin_(
+                    [*_ACTIVE_INVOICE_STATUSES, "Rejected", "Paid"]
+                ),
+            ),
+            or_(
+                WorkOrder.primary_status != "INVOICED",
+                WorkOrder.sc_invoice_status.is_not(None),
+            ),
+        )
+
         if invoice_tab == "ready_to_markup":
             filters.extend(stage_filter_clauses("ready_to_invoice"))
             filters.append(WorkOrder.brenk_markup_percent.is_(None))
+            filters.append(no_open_invoice)
+            filters.append(not_paid)
         elif invoice_tab == "marked_up":
             filters.extend(stage_filter_clauses("ready_to_invoice"))
             filters.append(WorkOrder.brenk_markup_percent.is_not(None))
+            filters.append(no_open_invoice)
+            filters.append(not_paid)
         elif invoice_tab == "sent":
-            filters.extend(stage_filter_clauses("invoiced"))
-            filters.append(WorkOrder.brenk_paid_at.is_(None))
+            filters.append(active_invoice)
+            filters.append(not_paid)
+        elif invoice_tab == "rejected":
+            filters.append(WorkOrder.sc_invoice_status == "Rejected")
+            filters.append(not_paid)
         elif invoice_tab == "paid":
-            filters.append(WorkOrder.brenk_paid_at.is_not(None))
+            filters.append(paid_cond)
 
     # Stuck filter: WOs sitting in any stage past its age threshold.
     # Same source-of-truth thresholds as the dashboard's is_stuck().
@@ -380,7 +431,25 @@ async def get_work_order(
     Returns 404 if no such work order exists.
     """
     wo = await _fetch_work_order(db, work_order_id)
-    return WorkOrderDetail.model_validate(wo)
+    return await _to_detail(db, wo)
+
+
+async def _to_detail(db: AsyncSession, wo: WorkOrder) -> WorkOrderDetail:
+    """Validate the WO into a detail schema and attach its linked SC
+    invoice record(s) (latest first), synced from invoice webhooks."""
+    detail = WorkOrderDetail.model_validate(wo)
+    if wo.sc_work_order_id is not None:
+        invoices = (
+            await db.execute(
+                select(Invoice)
+                .where(Invoice.wo_tracking_number == wo.sc_work_order_id)
+                .order_by(
+                    Invoice.sc_updated_date.desc().nullslast(), Invoice.id.desc()
+                )
+            )
+        ).scalars().all()
+        detail.sc_invoices = [InvoiceSummary.model_validate(inv) for inv in invoices]
+    return detail
 
 
 @router.patch("/{work_order_id}", response_model=WorkOrderDetail)
@@ -471,7 +540,7 @@ async def update_work_order(
     # any relationship that changed. Without it, the session's identity
     # map returns the pre-PATCH copy of the WO.
     fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
-    return WorkOrderDetail.model_validate(fresh)
+    return await _to_detail(db, fresh)
 
 
 @router.get("/{work_order_id}/notes", response_model=list[WorkOrderNoteRef])

@@ -201,7 +201,7 @@ export default async function VendorDetailPage({
                     </Td>
                     <Td>
                       <Link
-                        href={`/work-orders/${wo.id}`}
+                        href={`/work-orders/${wo.id}?from=vendors`}
                         className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
                       >
                         {wo.sc_number}

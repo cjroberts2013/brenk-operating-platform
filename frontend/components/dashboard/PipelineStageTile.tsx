@@ -80,7 +80,7 @@ function formatAge(days: number | null): string {
 // count. Every earlier stage routes to the WO list filtered to it.
 const STAGE_HREFS: Record<string, string> = {
   ready_to_invoice: '/invoices?tab=ready_to_markup',
-  invoiced: '/invoices?tab=sent',
+  invoiced: '/invoices',
 }
 
 export function PipelineStageTile({ stage }: { stage: PipelineStage }) {

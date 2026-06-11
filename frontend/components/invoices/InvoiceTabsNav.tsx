@@ -2,11 +2,14 @@ import Link from 'next/link'
 
 import { INVOICE_TAB_LABELS, type InvoiceTab } from '@/lib/api/types'
 
-const TABS: InvoiceTab[] = ['ready_to_markup', 'marked_up', 'sent', 'paid']
+// The worklist covers only the pre-invoice WO states (price, then submit
+// to SC). Once an invoice exists in SC it leaves the worklist and shows
+// in the Invoices list below.
+const TABS: InvoiceTab[] = ['ready_to_markup', 'marked_up']
 
 // Per-tab count is shown inline so Sue/Daryl see at a glance where
 // the pile is. Computed by the page from parallel calls.
-export type InvoiceTabCounts = Record<InvoiceTab, number>
+export type InvoiceTabCounts = Partial<Record<InvoiceTab, number>>
 
 export function InvoiceTabsNav({
   active,
@@ -38,7 +41,7 @@ export function InvoiceTabsNav({
                   : 'ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/5 dark:text-gray-400'
               }
             >
-              {counts[tab]}
+              {counts[tab] ?? 0}
             </span>
           </Link>
         )

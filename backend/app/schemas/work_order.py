@@ -50,6 +50,54 @@ class VendorRef(_OrmModel):
     name: str
 
 
+class InvoiceSummary(_OrmModel):
+    """A ServiceChannel invoice record (synced from SC invoice webhooks).
+
+    Surfaced on the WO detail so the full invoice is visible: number,
+    status, the client-billed amounts, and the lifecycle dates.
+    """
+
+    sc_invoice_id: int | None
+    invoice_number: str
+    status: str | None
+    currency: str | None
+    subtotal: Decimal | None
+    invoice_tax: Decimal | None
+    invoice_total: Decimal | None
+    approval_code: str | None
+    batch_number: str | None
+    comments: str | None
+    trade: str | None
+    category: str | None
+    invoice_date: datetime | None
+    posted_date: datetime | None
+    approved_date: datetime | None
+    paid_date: datetime | None
+    last_action_date: datetime | None
+    sc_updated_date: datetime | None
+    source: str
+
+
+class InvoiceListItem(InvoiceSummary):
+    """An invoice row for the invoice list, plus the linked WO for context
+    + navigation. work_order_id is the internal id (for the WO detail
+    link); wo_number is the SC work order number."""
+
+    work_order_id: int | None = None
+    wo_number: str | None = None
+    location_name: str | None = None
+    location_store_id: str | None = None
+
+
+class InvoiceListResponse(BaseModel):
+    """Paginated list of actual SC invoices."""
+
+    items: list[InvoiceListItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class WorkOrderSummary(_OrmModel):
     """A trimmed work-order shape suitable for list views and tables."""
 
@@ -84,6 +132,16 @@ class WorkOrderSummary(_OrmModel):
     # the list flag stalled rows inline. Defaults False; set per row
     # after model_validate.
     is_stuck: bool = False
+
+    # ServiceChannel invoice state, synced from SC webhooks. Lets the
+    # invoice queue show the real invoice number / status / billed total
+    # inline on the post-submit tabs.
+    sc_invoice_number: str | None
+    sc_invoice_status: str | None
+    sc_invoice_total: Decimal | None
+    sc_invoice_submitted_at: datetime | None
+    sc_invoice_last_error: str | None
+    sc_paid_at: datetime | None
 
 
 class WorkOrderDetail(_OrmModel):
@@ -152,9 +210,14 @@ class WorkOrderDetail(_OrmModel):
     sc_invoice_id: int | None
     sc_invoice_number: str | None
     sc_invoice_status: str | None
+    sc_invoice_total: Decimal | None
     sc_invoice_submitted_at: datetime | None
     sc_invoice_last_error: str | None
     sc_paid_at: datetime | None
+    # Full linked SC invoice record(s), latest first. Usually one; more
+    # when a WO was re-invoiced (e.g. void then resubmit). Attached by
+    # the detail endpoint; defaults empty.
+    sc_invoices: list[InvoiceSummary] = []
 
     notes_count: int
     attachments_count: int
