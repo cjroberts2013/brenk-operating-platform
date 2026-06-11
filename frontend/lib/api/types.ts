@@ -431,11 +431,28 @@ export type StuckWorkOrder = {
   sc_updated_date: string | null
 }
 
+/** Dashboard dollar totals. Amounts are 2-dp decimal strings, same as
+ *  the WO money fields. Mirrors `app/services/money.py` MoneyStats. */
+export type MoneyStats = {
+  unbilled_priced_total: string
+  unbilled_priced_count: number
+  unbilled_unpriced_nte_total: string
+  unbilled_unpriced_count: number
+  awaiting_total: string
+  awaiting_count: number
+  awaiting_unknown_count: number
+  paid_month_total: string
+  paid_month_count: number
+  paid_month_profit: string | null
+  month_label: string
+}
+
 export type DashboardPipeline = {
   stages: PipelineStage[]
   stuck: StuckWorkOrder[]
   total_open: number
   total_invoiced: number
+  money: MoneyStats
 }
 
 // =============================================================================

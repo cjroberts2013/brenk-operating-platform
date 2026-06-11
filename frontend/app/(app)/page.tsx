@@ -1,3 +1,4 @@
+import { MoneyStatsBand } from '@/components/dashboard/MoneyStatsBand'
 import { PipelineStageTile } from '@/components/dashboard/PipelineStageTile'
 import { StuckPanel } from '@/components/dashboard/StuckPanel'
 import { getDashboardPipeline } from '@/lib/api/dashboard'
@@ -16,6 +17,12 @@ export default async function DashboardPage() {
           pipeline · {data.total_invoiced} invoiced to date
         </p>
       </header>
+
+      {/* Money first: unbilled / awaiting payment / paid this month.
+          Counts say what's moving; these say what it's worth. */}
+      <section>
+        <MoneyStatsBand stats={data.money} />
+      </section>
 
       {/* Pipeline funnel: SC's color language left to right.
           Mobile: 2-up, md: 3-up, xl: full row of 6. */}

@@ -29,6 +29,7 @@ from app.schemas.dashboard import (
     StuckWorkOrder,
 )
 from app.schemas.work_order import LocationRef, TradeRef, VendorRef
+from app.services.money import compute_money_stats
 from app.services.pipeline import (
     STAGE_BY_KEY,
     STAGES,
@@ -148,4 +149,5 @@ async def get_pipeline(
         stuck=stuck_out,
         total_open=total_open,
         total_invoiced=total_invoiced,
+        money=compute_money_stats(list(rows)),
     )

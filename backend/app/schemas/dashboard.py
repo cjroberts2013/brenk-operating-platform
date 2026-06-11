@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.schemas.work_order import LocationRef, TradeRef, VendorRef
+from app.services.money import MoneyStats
 
 
 class PipelineStage(BaseModel):
@@ -49,3 +50,4 @@ class DashboardPipeline(BaseModel):
     stuck: list[StuckWorkOrder]
     total_open: int  # all non-terminal, non-invoiced WOs
     total_invoiced: int
+    money: MoneyStats
