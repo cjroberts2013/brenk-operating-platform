@@ -264,6 +264,42 @@ stays public and the dashboard stays locked.
   receivables aging (invoiced-but-unpaid > 30d), stage chip in WO
   list rows, stalest-first default sort.
 
+**Completed (2026-06-14, Phase 1.5 prod go-live):**
+- **Markup helper "price by total"** (commit `044fbb3`): new
+  `work_orders.brenk_total_override` (migration `a1b2c3d4e5f6`) lets
+  Daryl set a WO's total bill directly without entering vendor
+  labor/material — total-only WOs stay submittable to SC as a single
+  line item (pre-tax; 8.25% tax added at submit). money/invoice-queue/
+  next-step/checklist all treat a direct total as "priced". Verified
+  in-browser.
+- **All outstanding work committed + pushed + deployed:** the Phase 1.5
+  invoice-submit feature + markup override + WO-detail/AppShell UX
+  (commits `044fbb3`, `cfade00`, `7f07d1b`). Backend deployed to Fly
+  prod (web + worker); four additive migrations applied via
+  `release_command` (5 invoice tables, `work_orders.sc_invoice_*`,
+  `sc_invoice_total`, `brenk_total_override`). Frontend on Vercel.
+- **Invoice webhook sync LIVE in prod.** Receiver deployed
+  (`POST /api/v1/webhooks/servicechannel` → 200), `SC_WEBHOOK_SIGNING_KEY`
+  set via `fly secrets` and verified (valid sig → 200, bad sig → 401).
+  Webhook registered in SC Production Provider Automation (Invoice
+  subscription, no filters); Daryl/CJ activates from the SC UI.
+- **Historical invoices backfilled to prod** via
+  `backend/scripts/backfill_invoices.py` (built this session; dry-run
+  default, `--commit` to write, idempotent, `openpyxl`). 87 invoices
+  imported from the SC UI export (39 Approved, 48 Paid, ~$134k billed),
+  83 linked to work orders, 45 WOs auto-flagged paid. Real SC export
+  headers (`Inv.Status`, `Inv.Total`, `Inv. Date`, `Last Payment Date`,
+  …) mapped + confirmed.
+- **SC deep-link host fixed** (commit `7f07d1b`): prod
+  `NEXT_PUBLIC_SC_WEB_URL` was `sc.servicechannel.com` (dead host) →
+  corrected to **`https://www.servicechannel.com`** in Vercel +
+  `.env.local.example`. "Open in ServiceChannel" works in prod again.
+- Known loose ends: two self-test rows linger in prod `webhook_events`
+  (a `WebhookTest` + an `invalid_signature` probe — invisible to the UI,
+  cleanup pending explicit authorization); first real webhook event
+  should be checked against `invoice_sync.py`'s field mapping (spec §13c
+  step 7); §5.3 alerts not yet wired.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)
