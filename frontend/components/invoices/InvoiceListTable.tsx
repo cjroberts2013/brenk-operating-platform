@@ -13,14 +13,17 @@ const STATUS_TONE: Record<string, string> = {
 const DEFAULT_TONE =
   'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
 
-export function InvoiceListTable({ items }: { items: InvoiceListItem[] }) {
+export function InvoiceListTable({
+  items,
+  emptyMessage = "No invoices yet. They appear here as they're created in ServiceChannel.",
+}: {
+  items: InvoiceListItem[]
+  emptyMessage?: string
+}) {
   if (items.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 px-4 py-12 text-center dark:border-white/10">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          No invoices yet. They appear here as they&apos;re created in
-          ServiceChannel.
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{emptyMessage}</p>
       </div>
     )
   }

@@ -1,7 +1,13 @@
 import { ChevronDownIcon, InformationCircleIcon } from '@heroicons/react/20/solid'
 
 import { InvoiceListTable } from '@/components/invoices/InvoiceListTable'
+import { InvoicePagination } from '@/components/invoices/InvoicePagination'
 import { InvoiceQueueTable } from '@/components/invoices/InvoiceQueueTable'
+import { InvoiceSearch } from '@/components/invoices/InvoiceSearch'
+import {
+  InvoiceStatusTabs,
+  type InvoiceStatusTab,
+} from '@/components/invoices/InvoiceStatusTabs'
 import {
   InvoiceTabsNav,
   type InvoiceTabCounts,
@@ -21,11 +27,52 @@ type SearchParams = Record<string, string | string[] | undefined>
 // list (which is invoice-centric).
 const WORKLIST_TABS: InvoiceTab[] = ['ready_to_markup', 'marked_up']
 
+// Status buckets for the invoice list. Default to "awaiting" so the Paid
+// pile doesn't bury the actionable invoices. 'all' clears the filter.
+const INV_STATUS_TABS = [
+  { key: 'awaiting', label: 'Awaiting payment' },
+  { key: 'paid', label: 'Paid' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'all', label: 'All' },
+] as const
+type InvStatus = (typeof INV_STATUS_TABS)[number]['key']
+const INV_PAGE_SIZE = 25
+
 function parseTab(value: string | string[] | undefined): InvoiceTab {
   const raw = Array.isArray(value) ? value[0] : value
   return (WORKLIST_TABS as string[]).includes(raw ?? '')
     ? (raw as InvoiceTab)
     : 'ready_to_markup'
+}
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function parseInvStatus(value: string | string[] | undefined): InvStatus {
+  const raw = first(value)
+  return INV_STATUS_TABS.some((t) => t.key === raw)
+    ? (raw as InvStatus)
+    : 'awaiting'
+}
+
+/** Build an /invoices href preserving all current params, applying the
+ *  given overrides (undefined deletes the key). */
+function hrefWith(
+  sp: SearchParams,
+  overrides: Record<string, string | undefined>,
+): string {
+  const next = new URLSearchParams()
+  for (const [k, v] of Object.entries(sp)) {
+    const s = first(v)
+    if (s !== undefined) next.set(k, s)
+  }
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === undefined) next.delete(k)
+    else next.set(k, v)
+  }
+  const qs = next.toString()
+  return qs ? `/invoices?${qs}` : '/invoices'
 }
 
 export default async function InvoicesPage({
@@ -35,15 +82,51 @@ export default async function InvoicesPage({
 }) {
   const sp = await searchParams
   const tab = parseTab(sp.tab)
+  const invStatus = parseInvStatus(sp.inv_status)
+  const invQ = first(sp.inv_q)?.trim() || undefined
+  const invPage = Math.max(1, Number(first(sp.inv_page)) || 1)
 
-  // Invoice list (invoice-centric) + the WO worklist active tab + counts,
+  // A status bucket maps to the API's status_group; 'all' clears it.
+  const groupParam = (s: InvStatus) => (s === 'all' ? undefined : s)
+
+  // Active invoice page + per-tab counts (search-aware) + the WO worklist,
   // all in parallel.
-  const [invoices, active, ready, marked] = await Promise.all([
-    listInvoices({ page_size: 200 }),
-    listWorkOrders({ invoice_tab: tab, page_size: 200 }),
-    listWorkOrders({ invoice_tab: 'ready_to_markup', page_size: 1 }),
-    listWorkOrders({ invoice_tab: 'marked_up', page_size: 1 }),
-  ])
+  const [invoices, awaitingC, paidC, rejectedC, allC, active, ready, marked] =
+    await Promise.all([
+      listInvoices({
+        status_group: groupParam(invStatus),
+        q: invQ,
+        page: invPage,
+        page_size: INV_PAGE_SIZE,
+      }),
+      listInvoices({ status_group: 'awaiting', q: invQ, page_size: 1 }),
+      listInvoices({ status_group: 'paid', q: invQ, page_size: 1 }),
+      listInvoices({ status_group: 'rejected', q: invQ, page_size: 1 }),
+      listInvoices({ q: invQ, page_size: 1 }),
+      listWorkOrders({ invoice_tab: tab, page_size: 200 }),
+      listWorkOrders({ invoice_tab: 'ready_to_markup', page_size: 1 }),
+      listWorkOrders({ invoice_tab: 'marked_up', page_size: 1 }),
+    ])
+
+  const invCounts: Record<InvStatus, number> = {
+    awaiting: awaitingC.total,
+    paid: paidC.total,
+    rejected: rejectedC.total,
+    all: allC.total,
+  }
+
+  const statusTabs: InvoiceStatusTab[] = INV_STATUS_TABS.map((t) => ({
+    label: t.label,
+    count: invCounts[t.key],
+    active: t.key === invStatus,
+    href: hrefWith(sp, { inv_status: t.key, inv_page: undefined }),
+  }))
+
+  const lastPage = Math.max(1, Math.ceil(invoices.total / INV_PAGE_SIZE))
+  const prevHref =
+    invPage > 1 ? hrefWith(sp, { inv_page: String(invPage - 1) }) : null
+  const nextHref =
+    invPage < lastPage ? hrefWith(sp, { inv_page: String(invPage + 1) }) : null
 
   const counts: InvoiceTabCounts = {
     ready_to_markup: ready.total,
@@ -61,16 +144,30 @@ export default async function InvoicesPage({
       {/* Section 1: actual SC invoices (invoice-centric). */}
       <Section
         title="Invoices"
-        count={invoices.total}
+        count={invCounts.all}
         subtitle="Actual invoices in ServiceChannel, synced live as they're created and as their status changes (Sent → Approved → Paid)."
       >
-        <InvoiceListTable items={invoices.items} />
-        {invoices.total > invoices.items.length ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Showing first {invoices.items.length.toLocaleString()} of{' '}
-            {invoices.total.toLocaleString()}.
-          </p>
-        ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <InvoiceStatusTabs tabs={statusTabs} />
+          <InvoiceSearch />
+        </div>
+        <InvoiceListTable
+          items={invoices.items}
+          emptyMessage={
+            invQ
+              ? `No invoices match “${invQ}”${
+                  invStatus === 'all' ? '' : ' in this status'
+                }.`
+              : 'No invoices in this status.'
+          }
+        />
+        <InvoicePagination
+          page={invPage}
+          pageSize={INV_PAGE_SIZE}
+          total={invoices.total}
+          prevHref={prevHref}
+          nextHref={nextHref}
+        />
       </Section>
 
       {/* Section 2: the WO billing worklist (pre-invoice). */}
