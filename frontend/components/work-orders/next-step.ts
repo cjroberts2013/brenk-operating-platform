@@ -52,10 +52,18 @@ export function deriveNextStep(wo: WorkOrderDetail): NextStep {
   const awaitingStore = completed && e === 'PENDING CONFIRMATION'
   const pendingAcceptance =
     p === 'OPEN' || (p === 'IN PROGRESS' && e === 'WAITING FOR APPROVAL')
-  const invoiced = wo.is_invoiced || p === 'INVOICED'
+  // An active SC invoice synced via webhooks counts as invoiced even
+  // before the WO's own SC status flips to INVOICED on the next sync —
+  // otherwise the Submit button would linger right after submitting.
+  const activeScInvoice =
+    wo.sc_invoice_status !== null &&
+    !['Void', 'Rejected'].includes(wo.sc_invoice_status)
+  const invoiced = wo.is_invoiced || p === 'INVOICED' || activeScInvoice
   const hasVendor = wo.assigned_vendor !== null
   const notified = Boolean(wo.brenk_vendor_notified_at)
-  const hasMarkup = wo.brenk_markup_percent !== null
+  // Priced = a markup % OR a directly-entered total bill.
+  const hasMarkup =
+    wo.brenk_markup_percent !== null || wo.brenk_total_override !== null
   const paid = Boolean(wo.brenk_paid_at)
 
   if (canceled) {

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import { SubmitInvoiceButton } from '@/components/work-orders/SubmitInvoiceButton'
 import type { InvoiceTab, WorkOrderSummary } from '@/lib/api/types'
 import { money, relativeTime, shortDate } from '@/lib/format'
 
@@ -19,10 +20,11 @@ type ColumnKey =
   | 'sc_status'
   | 'sc_total'
   | 'sc_error'
+  | 'submit'
 
 const COLUMNS_BY_TAB: Record<InvoiceTab, ColumnKey[]> = {
   ready_to_markup: ['vendor', 'vendor_cost', 'updated'],
-  marked_up: ['vendor', 'vendor_cost', 'markup', 'total_bill', 'marked_up_at'],
+  marked_up: ['vendor', 'vendor_cost', 'markup', 'total_bill', 'submit'],
   // Post-submit tabs lead with the real SC invoice (synced from webhooks).
   sent: ['vendor', 'sc_invoice', 'sc_status', 'sc_total', 'sent_at'],
   rejected: ['vendor', 'sc_invoice', 'sc_status', 'sc_error'],
@@ -48,6 +50,7 @@ const COLUMN_LABELS: Record<ColumnKey, string> = {
   sc_status: 'SC status',
   sc_total: 'Billed',
   sc_error: 'Reason',
+  submit: '',
 }
 
 const SC_STATUS_TONE: Record<string, string> = {
@@ -75,8 +78,15 @@ function totalBill(
   labor: string | null,
   material: string | null,
   markup: string | null,
+  override: string | null,
 ): string | null {
-  // Total = (labor + material) * (1 + markup/100). Uses Brenk's
+  // A directly-entered total wins — that's Daryl pricing by the total
+  // instead of cost + markup.
+  if (override !== null) {
+    const o = Number(override)
+    return Number.isFinite(o) ? o.toFixed(2) : null
+  }
+  // Otherwise total = (labor + material) * (1 + markup/100). Uses Brenk's
   // internal vendor cost — NOT NTE. NTE is the client-side ceiling,
   // a separate number, never the cost basis for markup.
   const subtotal = vendorSubtotal(labor, material)
@@ -125,6 +135,10 @@ function CellValue({
         <span className="font-medium text-gray-900 dark:text-white">
           {Number(wo.brenk_markup_percent).toFixed(0)}%
         </span>
+      ) : wo.brenk_total_override !== null ? (
+        <span className="text-xs text-gray-400" title="Priced by total bill">
+          Direct
+        </span>
       ) : (
         <span className="text-gray-400">—</span>
       )
@@ -136,6 +150,7 @@ function CellValue({
               wo.brenk_labor_cost,
               wo.brenk_material_cost,
               wo.brenk_markup_percent,
+              wo.brenk_total_override,
             ),
           )}
         </span>
@@ -183,6 +198,10 @@ function CellValue({
       ) : (
         <span className="text-gray-400">—</span>
       )
+    case 'submit':
+      // Priced and ready: submit straight from the row. The dialog loads
+      // the server-computed preview and re-validates on submit.
+      return <SubmitInvoiceButton workOrderId={wo.id} size="row" />
   }
 }
 

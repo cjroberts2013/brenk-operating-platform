@@ -3,10 +3,49 @@
 import { revalidatePath } from 'next/cache'
 
 import { ApiError } from '@/lib/api/server'
-import { updateWorkOrder } from '@/lib/api/work-orders'
-import type { WorkOrderUpdate } from '@/lib/api/types'
+import {
+  getInvoicePreview,
+  submitInvoice,
+  updateWorkOrder,
+} from '@/lib/api/work-orders'
+import type { InvoiceSubmitPreview, WorkOrderUpdate } from '@/lib/api/types'
 
 export type MarkupActionResult = { error: string | null }
+
+export type InvoicePreviewResult = {
+  preview: InvoiceSubmitPreview | null
+  error: string | null
+}
+
+/** Load the server-computed submit preview for the confirm dialog. */
+export async function previewInvoiceAction(
+  workOrderId: number,
+): Promise<InvoicePreviewResult> {
+  try {
+    return { preview: await getInvoicePreview(workOrderId), error: null }
+  } catch (err) {
+    if (err instanceof ApiError) return { preview: null, error: err.detail }
+    throw err
+  }
+}
+
+/** Submit the invoice to ServiceChannel. `invoiceText` supplies/overrides
+ *  the WO resolution as SC's InvoiceText (required by CubeSmart). */
+export async function submitInvoiceAction(
+  workOrderId: number,
+  invoiceText: string | null,
+): Promise<MarkupActionResult> {
+  try {
+    await submitInvoice(workOrderId, { invoice_text: invoiceText })
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath(`/work-orders/${workOrderId}`)
+  revalidatePath('/invoices')
+  revalidatePath('/')
+  return { error: null }
+}
 
 export type SaveInvoiceInput = {
   /** Empty string clears, undefined leaves alone. */
@@ -15,6 +54,10 @@ export type SaveInvoiceInput = {
   material_cost?: string
   /** Empty string clears, undefined leaves alone. */
   markup_percent?: string
+  /** Directly-entered pre-tax total bill. Empty string clears,
+   *  undefined leaves alone. Mutually exclusive with markup_percent
+   *  in practice. */
+  total_override?: string
 }
 
 /** Save the markup helper's inputs (labor cost + material cost +
@@ -66,6 +109,11 @@ export async function saveInvoiceAction(
     const r = numericField(input.markup_percent, 'Markup', 1000)
     if (!r.ok) return { error: r.error }
     body.brenk_markup_percent = r.value
+  }
+  if (input.total_override !== undefined) {
+    const r = numericField(input.total_override, 'Total bill')
+    if (!r.ok) return { error: r.error }
+    body.brenk_total_override = r.value
   }
 
   if (Object.keys(body).length === 0) {

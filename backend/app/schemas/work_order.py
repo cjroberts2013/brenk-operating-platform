@@ -98,6 +98,33 @@ class InvoiceListResponse(BaseModel):
     page_size: int
 
 
+class InvoiceSubmitPreview(BaseModel):
+    """Server-computed preview of what POST /v3/invoices would send.
+
+    The confirm dialog renders this verbatim — what Daryl approves is
+    exactly what goes to SC. `problems` non-empty = not submittable
+    (a missing-resolution problem clears once the dialog supplies text).
+    """
+
+    eligible: bool
+    problems: list[str]
+    invoice_number: str
+    labor_amount: Decimal
+    material_amount: Decimal
+    subtotal: Decimal
+    tax_amount: Decimal  # 8.25% TX sales tax, matching Daryl's real invoices
+    invoice_total: Decimal  # subtotal + tax; must be <= NTE
+    nte: Decimal | None
+    resolution_text: str | None
+
+
+class InvoiceSubmitRequest(BaseModel):
+    """Body for POST /work-orders/{id}/submit-invoice. `invoice_text`
+    overrides/supplies the WO resolution as SC's InvoiceText."""
+
+    invoice_text: str | None = None
+
+
 class WorkOrderSummary(_OrmModel):
     """A trimmed work-order shape suitable for list views and tables."""
 
@@ -123,6 +150,7 @@ class WorkOrderSummary(_OrmModel):
     brenk_labor_cost: Decimal | None
     brenk_material_cost: Decimal | None
     brenk_markup_percent: Decimal | None
+    brenk_total_override: Decimal | None
     brenk_marked_up_at: datetime | None
     brenk_paid_at: datetime | None
     brenk_vendor_notified_at: datetime | None
@@ -202,6 +230,10 @@ class WorkOrderDetail(_OrmModel):
     brenk_labor_cost: Decimal | None
     brenk_material_cost: Decimal | None
     brenk_markup_percent: Decimal | None
+    # Directly-entered pre-tax total bill (Daryl's "just set the total"
+    # path). When set, it's the source of truth for the total and the
+    # markup % is unknown. Brenk-confidential.
+    brenk_total_override: Decimal | None
     brenk_marked_up_at: datetime | None
     brenk_paid_at: datetime | None
     brenk_vendor_notified_at: datetime | None

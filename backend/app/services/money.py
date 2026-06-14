@@ -73,7 +73,14 @@ def _q(amount: Decimal) -> str:
 
 
 def brenk_total_bill(wo: WorkOrder) -> Decimal | None:
-    """(labor + material) * (1 + markup/100), or None if not fully priced."""
+    """Pre-tax total bill, or None if not yet priced.
+
+    A directly-entered total (`brenk_total_override`) wins when set —
+    that's Daryl pricing by the total instead of cost + markup.
+    Otherwise it's the cost-derived (labor + material) * (1 + markup/100).
+    """
+    if wo.brenk_total_override is not None:
+        return wo.brenk_total_override
     if wo.brenk_markup_percent is None:
         return None
     cost = (wo.brenk_labor_cost or Decimal(0)) + (wo.brenk_material_cost or Decimal(0))

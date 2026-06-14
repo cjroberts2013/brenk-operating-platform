@@ -12,6 +12,7 @@ import {
   deriveNextStep,
 } from '@/components/work-orders/next-step'
 import { ScInvoiceCard } from '@/components/work-orders/ScInvoiceCard'
+import { SubmitInvoiceButton } from '@/components/work-orders/SubmitInvoiceButton'
 import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
 import { VendorNotifiedControl } from '@/components/work-orders/VendorNotifiedControl'
 import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
@@ -78,7 +79,12 @@ export default async function WorkOrderDetailPage({
   // step (price it / invoice it / mark paid). Auto-expand it then; keep
   // it collapsed on early-stage, canceled, and fully-paid WOs so it
   // isn't clutter. Same derivation as the Next-step card.
-  const markupOpen = BILLING_STEP_KINDS.has(deriveNextStep(wo).kind)
+  const nextStep = deriveNextStep(wo)
+  const markupOpen = BILLING_STEP_KINDS.has(nextStep.kind)
+  // Submit button appears exactly when the derived next step is "invoice
+  // in SC": markup is set, the WO is invoice-eligible, and no active SC
+  // invoice exists yet. The dialog re-validates server-side regardless.
+  const canSubmitInvoice = nextStep.kind === 'invoice'
 
   // Full record for the assigned vendor (the WO only embeds id/name),
   // so the next-step card can show their preferred contact method.
@@ -122,6 +128,14 @@ export default async function WorkOrderDetailPage({
         </div>
       </header>
 
+      {/* The single most important thing on the page, full width at the
+          top: what to do next (with the action/contact inline). */}
+      <NextStepCard
+        wo={wo}
+        scWebUrl={SC_WEB_URL}
+        vendorContact={assignedVendor}
+      />
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left + middle: WO info and notes */}
         <div className="space-y-6 lg:col-span-2">
@@ -131,7 +145,7 @@ export default async function WorkOrderDetailPage({
                 Details
               </h2>
             </header>
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-3 px-4 py-4 text-sm sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-3 px-4 py-4 text-sm sm:grid-cols-2 xl:grid-cols-3">
               <Field label="Trade" value={wo.trade?.name} />
               <Field label="Priority" value={wo.priority} />
               <Field label="Category" value={wo.category} />
@@ -187,14 +201,8 @@ export default async function WorkOrderDetailPage({
           <NotesTimeline notes={notes} />
         </div>
 
-        {/* Right rail: next step + workflow + markup + meta */}
+        {/* Right rail: workflow + markup + meta */}
         <div className="space-y-6">
-          <NextStepCard
-            wo={wo}
-            scWebUrl={SC_WEB_URL}
-            vendorContact={assignedVendor}
-          />
-
           <WorkflowChecklist
             wo={wo}
             vendorControl={
@@ -214,6 +222,8 @@ export default async function WorkOrderDetailPage({
           />
 
           <MarkupHelper wo={wo} defaultOpen={markupOpen} />
+
+          {canSubmitInvoice ? <SubmitInvoiceButton workOrderId={wo.id} /> : null}
 
           <ScInvoiceCard wo={wo} scWebUrl={SC_WEB_URL} />
 

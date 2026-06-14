@@ -8,6 +8,7 @@
 
 import { apiFetch } from './server'
 import type {
+  InvoiceSubmitPreview,
   WorkOrderDetail,
   WorkOrderListParams,
   WorkOrderListResponse,
@@ -47,6 +48,22 @@ export function updateWorkOrder(
 ): Promise<WorkOrderDetail> {
   return apiFetch<WorkOrderDetail>(`/api/v1/work-orders/${id}`, {
     method: 'PATCH',
+    body,
+  })
+}
+
+export function getInvoicePreview(id: number): Promise<InvoiceSubmitPreview> {
+  return apiFetch<InvoiceSubmitPreview>(
+    `/api/v1/work-orders/${id}/invoice-preview`,
+  )
+}
+
+export function submitInvoice(
+  id: number,
+  body: { invoice_text?: string | null },
+): Promise<WorkOrderDetail> {
+  return apiFetch<WorkOrderDetail>(`/api/v1/work-orders/${id}/submit-invoice`, {
+    method: 'POST',
     body,
   })
 }

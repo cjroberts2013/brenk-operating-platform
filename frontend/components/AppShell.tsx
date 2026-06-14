@@ -30,6 +30,8 @@ import {
   BellIcon,
   BanknotesIcon,
   ChartPieIcon,
+  ChevronDoubleLeftIcon,
+  ChevronDoubleRightIcon,
   Cog6ToothIcon,
   GlobeAltIcon,
   HomeIcon,
@@ -88,16 +90,19 @@ function isActive(pathname: string, href: string): boolean {
 function SidebarContents({
   pathname,
   onNavigate,
+  collapsed = false,
 }: {
   pathname: string
   /** Called when a nav item is tapped. Used on mobile to close the drawer. */
   onNavigate?: () => void
+  /** Icon-only rail mode (desktop). Labels hide; titles take over. */
+  collapsed?: boolean
 }) {
   return (
     <nav className="flex flex-1 flex-col">
       <ul role="list" className="flex flex-1 flex-col gap-y-7">
         <li>
-          <ul role="list" className="-mx-2 space-y-1">
+          <ul role="list" className={classNames(!collapsed && '-mx-2', 'space-y-1')}>
             {visibleNavigation.map((item) => {
               const active = isActive(pathname, item.href)
               return (
@@ -105,16 +110,18 @@ function SidebarContents({
                   <Link
                     href={item.href}
                     onClick={onNavigate}
+                    title={collapsed ? item.name : undefined}
                     aria-current={active ? 'page' : undefined}
                     className={classNames(
                       active
                         ? 'bg-white/5 text-white'
                         : 'text-gray-400 hover:bg-white/5 hover:text-white',
+                      collapsed && 'justify-center',
                       'group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold',
                     )}
                   >
                     <item.icon aria-hidden="true" className="size-6 shrink-0" />
-                    {item.name}
+                    {!collapsed && item.name}
                   </Link>
                 </li>
               )
@@ -125,16 +132,18 @@ function SidebarContents({
           <Link
             href="/settings"
             onClick={onNavigate}
+            title={collapsed ? 'Settings' : undefined}
             aria-current={isActive(pathname, '/settings') ? 'page' : undefined}
             className={classNames(
               isActive(pathname, '/settings')
                 ? 'bg-white/5 text-white'
                 : 'text-gray-400 hover:bg-white/5 hover:text-white',
-              'group -mx-2 flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold',
+              collapsed ? 'justify-center' : '-mx-2',
+              'group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold',
             )}
           >
             <Cog6ToothIcon aria-hidden="true" className="size-6 shrink-0" />
-            Settings
+            {!collapsed && 'Settings'}
           </Link>
         </li>
       </ul>
@@ -142,14 +151,14 @@ function SidebarContents({
   )
 }
 
-function LogoMark() {
+function LogoMark({ compact = false }: { compact?: boolean }) {
   // Placeholder until we have a real logo asset.
   return (
     <div className="flex items-center gap-x-2">
       <div className="flex size-8 items-center justify-center rounded-md bg-indigo-500 text-sm font-semibold text-white">
         B
       </div>
-      <span className="text-sm font-semibold text-white">Brenk</span>
+      {!compact && <span className="text-sm font-semibold text-white">Brenk</span>}
     </div>
   )
 }
@@ -157,12 +166,25 @@ function LogoMark() {
 export default function AppShell({
   children,
   user,
+  initialNavCollapsed = false,
 }: {
   children: React.ReactNode
   user: ShellUser | null
+  /** Server-read cookie value so the collapsed state renders correctly
+   * on first paint (no flash / hydration mismatch). */
+  initialNavCollapsed?: boolean
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [navCollapsed, setNavCollapsed] = useState(initialNavCollapsed)
   const pathname = usePathname()
+
+  function toggleNavCollapsed() {
+    const next = !navCollapsed
+    setNavCollapsed(next)
+    // Persisted as a cookie (not localStorage) so the server layout can
+    // render the right width on the next request.
+    document.cookie = `nav_collapsed=${next ? '1' : '0'}; path=/; max-age=31536000; samesite=lax`
+  }
 
   return (
     <div>
@@ -210,18 +232,56 @@ export default function AppShell({
         </div>
       </Dialog>
 
-      {/* Static sidebar for desktop */}
-      <div className="hidden bg-gray-900 ring-1 ring-white/10 lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
-        <div className="flex grow flex-col gap-y-5 overflow-y-auto bg-black/10 px-6 pb-4">
-          <div className="flex h-16 shrink-0 items-center">
-            <LogoMark />
+      {/* Static sidebar for desktop — collapsible to an icon rail. */}
+      <div
+        className={classNames(
+          'hidden bg-gray-900 ring-1 ring-white/10 transition-[width] duration-200 lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:flex-col',
+          navCollapsed ? 'lg:w-16' : 'lg:w-72',
+        )}
+      >
+        <div
+          className={classNames(
+            'flex grow flex-col gap-y-5 overflow-y-auto bg-black/10 pb-4',
+            navCollapsed ? 'px-2' : 'px-6',
+          )}
+        >
+          <div
+            className={classNames(
+              'flex h-16 shrink-0 items-center',
+              navCollapsed && 'justify-center',
+            )}
+          >
+            <LogoMark compact={navCollapsed} />
           </div>
-          <SidebarContents pathname={pathname} />
+          <SidebarContents pathname={pathname} collapsed={navCollapsed} />
+          <button
+            type="button"
+            onClick={toggleNavCollapsed}
+            title={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+            className={classNames(
+              'flex items-center gap-x-2 rounded-md p-2 text-xs font-medium text-gray-500 hover:bg-white/5 hover:text-white',
+              navCollapsed ? 'justify-center' : '-mx-2',
+            )}
+          >
+            {navCollapsed ? (
+              <ChevronDoubleRightIcon aria-hidden="true" className="size-5 shrink-0" />
+            ) : (
+              <>
+                <ChevronDoubleLeftIcon aria-hidden="true" className="size-5 shrink-0" />
+                Collapse
+              </>
+            )}
+          </button>
         </div>
       </div>
 
       {/* Main column */}
-      <div className="lg:pl-72">
+      <div
+        className={classNames(
+          'transition-[padding] duration-200',
+          navCollapsed ? 'lg:pl-16' : 'lg:pl-72',
+        )}
+      >
         <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-xs sm:gap-x-6 sm:px-6 lg:px-8 dark:border-white/10 dark:bg-gray-900">
           <button
             type="button"

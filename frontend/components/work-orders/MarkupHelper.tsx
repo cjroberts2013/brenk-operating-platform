@@ -62,20 +62,27 @@ export function MarkupHelper({
   // form the vendor cost; markup applies to their sum.
   const [labor, setLabor] = useState<string>(wo.brenk_labor_cost ?? '')
   const [material, setMaterial] = useState<string>(wo.brenk_material_cost ?? '')
+  const hasOverride =
+    wo.brenk_total_override !== null && wo.brenk_total_override !== undefined
   const initialMarkup =
     wo.brenk_markup_percent ?? wo.trade?.default_markup_percent ?? ''
   // Daryl can drive pricing in whichever unit he thinks in: markup %,
   // the final total bill, or the profit. `priceInput` holds the raw text
-  // of the active unit; the canonical markup % is derived from it.
-  const [priceMode, setPriceMode] = useState<PriceMode>('percent')
-  const [priceInput, setPriceInput] = useState<string>(initialMarkup)
+  // of the active unit. If this WO was priced by a direct total, open in
+  // "Total bill" mode showing that number.
+  const [priceMode, setPriceMode] = useState<PriceMode>(
+    hasOverride ? 'total' : 'percent',
+  )
+  const [priceInput, setPriceInput] = useState<string>(
+    hasOverride ? trimNum(Number(wo.brenk_total_override)) : initialMarkup,
+  )
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [savedTick, setSavedTick] = useState(0)
 
   const tradeDefault = wo.trade?.default_markup_percent ?? null
   const tradeName = wo.trade?.name ?? null
-  const chosenMarkup = wo.brenk_markup_percent
+  const isPriced = wo.brenk_markup_percent !== null || hasOverride
   const isPaid = Boolean(wo.brenk_paid_at)
   const nte = wo.nte ? Number(wo.nte) : null
 
@@ -86,33 +93,62 @@ export function MarkupHelper({
   const materialN = num(material)
   const subtotal = laborN + materialN
   const haveCost = subtotal > 0
-  const markupPct = deriveMarkupPct(priceInput, priceMode, subtotal)
-  const haveMarkup = markupPct !== null
-  const liveTotal = haveCost && haveMarkup ? subtotal * (1 + markupPct / 100) : null
-  const liveProfit = haveCost && haveMarkup ? subtotal * (markupPct / 100) : null
+
+  // Direct-total path: in "Total bill" mode with no vendor cost entered,
+  // the number Daryl types IS the (pre-tax) total — stored verbatim as
+  // brenk_total_override, markup % stays unknown. The moment a vendor
+  // cost exists we fall back to deriving a real markup %.
+  const directTotal = priceMode === 'total' && !haveCost
+  const directTotalVal = (() => {
+    if (!directTotal) return null
+    const v = Number(priceInput)
+    return priceInput.trim() !== '' && Number.isFinite(v) && v > 0 ? v : null
+  })()
+
+  const markupPct = directTotal
+    ? null
+    : deriveMarkupPct(priceInput, priceMode, subtotal)
+  const liveTotal = directTotal
+    ? directTotalVal
+    : haveCost && markupPct !== null
+      ? subtotal * (1 + markupPct / 100)
+      : null
+  const liveProfit =
+    !directTotal && haveCost && markupPct !== null
+      ? subtotal * (markupPct / 100)
+      : null
   const overNte = nte !== null && liveTotal !== null && liveTotal > nte
-  // The percent string we persist, regardless of the unit it was entered in.
+
+  // What we persist: in direct-total mode, the override; otherwise the
+  // canonical markup %. The two are mutually exclusive — saving one
+  // clears the other.
   const markupForSave = markupPct !== null ? markupPct.toFixed(2) : ''
+  const overrideForSave =
+    directTotal && directTotalVal !== null ? directTotalVal.toFixed(2) : ''
 
   function switchMode(next: PriceMode) {
     // Carry the current value over into the new unit so toggling doesn't reset it.
     if (next === 'percent') {
       setPriceInput(markupPct !== null ? trimNum(markupPct) : '')
     } else if (next === 'total') {
-      setPriceInput(markupPct !== null && haveCost ? liveTotal!.toFixed(2) : '')
+      // Carry a known total if we have one; otherwise leave blank so
+      // Daryl can type the total directly (the no-cost override path).
+      setPriceInput(liveTotal !== null ? liveTotal.toFixed(2) : '')
     } else {
       setPriceInput(markupPct !== null && haveCost ? liveProfit!.toFixed(2) : '')
     }
     setPriceMode(next)
   }
 
-  const attribution = chosenMarkup
-    ? `Markup set ${formatRelative(wo.brenk_marked_up_at)} · editable below`
-    : tradeDefault && tradeName
-      ? `Suggested ${Number(tradeDefault).toFixed(0)}% (${tradeName} default)`
-      : tradeName
-        ? `No default set for ${tradeName} yet — set one in Settings`
-        : 'No trade on this WO; pick a markup manually'
+  const attribution = hasOverride
+    ? `Total set ${formatRelative(wo.brenk_marked_up_at)} · editable below`
+    : wo.brenk_markup_percent !== null
+      ? `Markup set ${formatRelative(wo.brenk_marked_up_at)} · editable below`
+      : tradeDefault && tradeName
+        ? `Suggested ${Number(tradeDefault).toFixed(0)}% (${tradeName} default)`
+        : tradeName
+          ? `No default set for ${tradeName} yet — set one in Settings`
+          : 'No trade on this WO; pick a markup manually'
 
   function save() {
     setError(null)
@@ -123,11 +159,24 @@ export function MarkupHelper({
       return
     }
     startTransition(async () => {
-      const result = await saveInvoiceAction(wo.id, {
-        labor_cost: labor,
-        material_cost: material,
-        markup_percent: markupForSave,
-      })
+      // Persist whichever pricing path is active and clear the other so
+      // markup % and a direct total never coexist on the same WO.
+      const result = await saveInvoiceAction(
+        wo.id,
+        directTotal
+          ? {
+              labor_cost: labor,
+              material_cost: material,
+              markup_percent: '',
+              total_override: overrideForSave,
+            }
+          : {
+              labor_cost: labor,
+              material_cost: material,
+              markup_percent: markupForSave,
+              total_override: '',
+            },
+      )
       if (result.error) setError(result.error)
       else setSavedTick((n) => n + 1)
     })
@@ -136,7 +185,10 @@ export function MarkupHelper({
   function clearMarkup() {
     setError(null)
     startTransition(async () => {
-      const result = await saveInvoiceAction(wo.id, { markup_percent: '' })
+      const result = await saveInvoiceAction(wo.id, {
+        markup_percent: '',
+        total_override: '',
+      })
       if (result.error) setError(result.error)
       else {
         setPriceMode('percent')
@@ -157,11 +209,19 @@ export function MarkupHelper({
   const savedMarkup = wo.brenk_markup_percent
     ? Number(wo.brenk_markup_percent).toFixed(2)
     : ''
+  const savedOverride = hasOverride
+    ? Number(wo.brenk_total_override).toFixed(2)
+    : ''
+  // What save() would write for the two pricing fields, given the active
+  // path. Dirty if any of labor / material / markup / override changes.
+  const nextMarkup = directTotal ? '' : markupForSave
+  const nextOverride = directTotal ? overrideForSave : ''
   const canSubmit =
     !pending &&
     (labor !== (wo.brenk_labor_cost ?? '') ||
       material !== (wo.brenk_material_cost ?? '') ||
-      markupForSave !== savedMarkup)
+      nextMarkup !== savedMarkup ||
+      nextOverride !== savedOverride)
 
   return (
     <details
@@ -270,7 +330,7 @@ export function MarkupHelper({
               min={0}
               value={priceInput}
               onChange={(e) => setPriceInput(e.target.value)}
-              disabled={pending || (priceMode !== 'percent' && !haveCost)}
+              disabled={pending || (priceMode === 'profit' && !haveCost)}
               className="w-24 rounded-md border border-gray-300 bg-white px-2 py-1 text-right text-sm text-gray-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 dark:border-white/10 dark:bg-gray-800 dark:text-white"
             />
             {priceMode === 'percent' ? (
@@ -278,9 +338,15 @@ export function MarkupHelper({
             ) : null}
           </div>
         </div>
-        {priceMode !== 'percent' && !haveCost ? (
+        {priceMode === 'profit' && !haveCost ? (
           <p className="text-right text-xs text-gray-400">
             Enter a labor or material cost first.
+          </p>
+        ) : null}
+        {directTotal && directTotalVal !== null ? (
+          <p className="text-right text-xs text-gray-400">
+            Billing the total directly — no vendor cost on file, so margin
+            isn’t tracked. Add a labor/material cost to capture the markup.
           </p>
         ) : null}
 
@@ -330,12 +396,12 @@ export function MarkupHelper({
           >
             {pending ? 'Saving…' : 'Save'}
           </button>
-          {chosenMarkup ? (
+          {isPriced ? (
             <button
               type="button"
               onClick={clearMarkup}
               disabled={pending}
-              title="Clear markup and return to Ready to mark up (costs stay)"
+              title="Clear pricing and return to Ready to mark up (costs stay)"
               className="rounded-md px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5"
             >
               Clear markup

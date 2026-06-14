@@ -21,6 +21,7 @@ def _wo(
     labor=None,
     material=None,
     markup=None,
+    total_override=None,
     nte=None,
     sc_invoice_status=None,
     sc_invoice_total=None,
@@ -37,6 +38,7 @@ def _wo(
     wo.brenk_labor_cost = Decimal(labor) if labor is not None else None
     wo.brenk_material_cost = Decimal(material) if material is not None else None
     wo.brenk_markup_percent = Decimal(markup) if markup is not None else None
+    wo.brenk_total_override = Decimal(total_override) if total_override is not None else None
     wo.nte = Decimal(nte) if nte is not None else None
     wo.sc_invoice_status = sc_invoice_status
     wo.sc_invoice_total = Decimal(sc_invoice_total) if sc_invoice_total is not None else None
@@ -76,6 +78,14 @@ def test_markup_without_costs_counts_as_unpriced() -> None:
     stats = compute_money_stats([_wo(markup=80, nte=250)], now=NOW)
     assert stats.unbilled_priced_count == 0
     assert stats.unbilled_unpriced_count == 1
+
+
+def test_total_override_prices_the_job() -> None:
+    # A directly-entered total prices the WO even with no vendor costs.
+    stats = compute_money_stats([_wo(total_override=200, nte=400)], now=NOW)
+    assert stats.unbilled_priced_total == "200.00"
+    assert stats.unbilled_priced_count == 1
+    assert stats.unbilled_unpriced_count == 0
 
 
 def test_pending_confirmation_not_unbilled() -> None:

@@ -1,3 +1,5 @@
+import { cookies } from 'next/headers'
+
 import AppShell, { type ShellUser } from '@/components/AppShell'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -23,5 +25,13 @@ export default async function AppLayout({
   children: React.ReactNode
 }) {
   const user = await getShellUser()
-  return <AppShell user={user}>{children}</AppShell>
+  // Sidebar collapse preference is a cookie so the server renders the
+  // correct width on first paint — no flash, no hydration mismatch.
+  const cookieStore = await cookies()
+  const initialNavCollapsed = cookieStore.get('nav_collapsed')?.value === '1'
+  return (
+    <AppShell user={user} initialNavCollapsed={initialNavCollapsed}>
+      {children}
+    </AppShell>
+  )
 }

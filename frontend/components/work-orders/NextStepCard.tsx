@@ -57,34 +57,41 @@ export function NextStepCard({
       ? 'text-gray-500 dark:text-gray-400'
       : 'text-indigo-700 dark:text-indigo-400'
 
+  // Full-width banner: text left, contact/action right. Keeps the most
+  // important thing on the page at the very top without costing the
+  // right rail its width.
   return (
     <section className={`rounded-lg p-4 ring-1 ${tone}`}>
-      <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${eyebrow}`}>
-        {done ? <CheckCircleIcon className="size-4" /> : null}
-        {done ? 'Complete' : waiting ? 'Status' : 'Next step'}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${eyebrow}`}>
+            {done ? <CheckCircleIcon className="size-4" /> : null}
+            {done ? 'Complete' : waiting ? 'Status' : 'Next step'}
+          </div>
+          <h2 className="mt-1 text-base font-semibold text-gray-900 dark:text-white">
+            {step.title}
+          </h2>
+          <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-300">
+            {step.detail}
+          </p>
+        </div>
+
+        <div className="shrink-0">
+          {step.kind === 'notify' && vendorContact ? (
+            <NotifyContact vendor={vendorContact} />
+          ) : step.owner === 'sc' ? (
+            <a
+              href={`${scWebUrl}/sc/wo/Workorders/index?id=${wo.sc_work_order_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+            >
+              Open in ServiceChannel
+              <ArrowTopRightOnSquareIcon className="size-4" />
+            </a>
+          ) : null}
+        </div>
       </div>
-      <h2 className="mt-1.5 text-base font-semibold text-gray-900 dark:text-white">
-        {step.title}
-      </h2>
-      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-        {step.detail}
-      </p>
-
-      {step.kind === 'notify' && vendorContact ? (
-        <NotifyContact vendor={vendorContact} />
-      ) : null}
-
-      {step.owner === 'sc' ? (
-        <a
-          href={`${scWebUrl}/sc/wo/Workorders/index?id=${wo.sc_work_order_id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
-        >
-          Open in ServiceChannel
-          <ArrowTopRightOnSquareIcon className="size-4" />
-        </a>
-      ) : null}
     </section>
   )
 }
@@ -97,7 +104,7 @@ function NotifyContact({ vendor }: { vendor: VendorSummary }) {
   const digits = phone ? phone.replace(/\D/g, '') : ''
   if (!prefLabel && !phone && !email && !notes) return null
   return (
-    <div className="mt-3 rounded-md bg-white/70 px-3 py-2 dark:bg-white/5">
+    <div className="rounded-md bg-white/70 px-3 py-2 dark:bg-white/5">
       <div className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
         How to reach {vendor.name}
       </div>

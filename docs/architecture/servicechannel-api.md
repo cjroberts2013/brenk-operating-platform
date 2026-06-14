@@ -506,6 +506,18 @@ What we know we'll send for the minimum-viable Brenk submit:
 
 ### Open decisions for the implementation
 
+> **BUILT 2026-06-11.** The submit path shipped:
+> `app/services/invoice_submit.py` (validation + payload builder, unit
+> tested), `GET /work-orders/{id}/invoice-preview` +
+> `POST /work-orders/{id}/submit-invoice`, and a confirm-dialog UI
+> (`SubmitInvoiceButton`) on the WO detail and the Invoices "Marked up"
+> rows. Decisions taken: invoice number `BRENK{wo_number}` (+`R2`/`R3`
+> on re-invoice; dashes dropped per CubeSmart's `^\w*$` rule — pending
+> Daryl's confirmation of preferred scheme), always Line Item form (one
+> synthetic labor/material line at the marked-up amount), zero tax,
+> dialog-always-on. The webhook sync then confirms the created invoice
+> and drives status from there.
+
 1. **InvoiceNumber format** — Daryl likely has an existing scheme he
    uses in SC. Likely candidates:
    - `BRENK-{wo.sc_number}` — readable, unique per WO. *(default if Daryl has no preference)*

@@ -272,6 +272,17 @@ class WorkOrder(Base, TimestampMixin):
     brenk_labor_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     brenk_material_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     brenk_markup_percent: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    # Directly-entered, pre-tax total bill — Daryl's escape hatch for
+    # when he just knows the number he's charging and doesn't want to
+    # break out vendor labor/material + markup. When set, this is the
+    # source of truth for the (pre-tax) total bill: the derived
+    # cost*(1+markup) calc is bypassed and the markup % is left unknown.
+    # Same units as the cost-derived total (8.25% TX sales tax is added
+    # at invoice-submit time, not stored here). Mutually exclusive with
+    # the cost/markup path in practice — entering vendor costs converts
+    # it back to a real markup. Brenk-confidential — never pushed to SC
+    # as a breakdown; only the final total reaches the client invoice.
+    brenk_total_override: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     brenk_marked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     brenk_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -291,9 +302,7 @@ class WorkOrder(Base, TimestampMixin):
     # Amount actually invoiced to the client per SC (vs Brenk's internal
     # computed total). Synced from the invoice's InvoiceTotal.
     sc_invoice_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
-    sc_invoice_submitted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    sc_invoice_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sc_invoice_last_error: Mapped[str | None] = mapped_column(Text)
     # SC-derived paid timestamp (from an InvoicePaid event). brenk_paid_at
     # stays the manual override; we also populate it from here when it's

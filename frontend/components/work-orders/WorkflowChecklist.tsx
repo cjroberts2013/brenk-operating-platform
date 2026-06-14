@@ -63,7 +63,9 @@ export function deriveStages(wo: WorkOrderDetail): Stage[] {
     (isCompleted(status) &&
       !['PENDING CONFIRMATION', 'CANCELED', 'NO CHARGE'].includes(extended)) ||
     invoiced
-  const hasMarkup = wo.brenk_markup_percent !== null
+  // Priced = a markup % OR a directly-entered total bill.
+  const hasMarkup =
+    wo.brenk_markup_percent !== null || wo.brenk_total_override !== null
 
   return [
     {
@@ -117,7 +119,9 @@ export function deriveStages(wo: WorkOrderDetail): Stage[] {
       source: 'Brenk',
       state: hasMarkup ? 'done' : 'pending',
       detail: hasMarkup
-        ? `${Number(wo.brenk_markup_percent).toFixed(0)}% markup`
+        ? wo.brenk_markup_percent !== null
+          ? `${Number(wo.brenk_markup_percent).toFixed(0)}% markup`
+          : 'Priced by total bill'
         : 'Set in the markup helper below',
     },
     { label: 'Invoiced', source: 'SC', state: invoiced ? 'done' : 'pending' },
@@ -170,6 +174,35 @@ export function WorkflowChecklist({
 }) {
   const stages = deriveStages(wo)
 
+  // Compact the list: contiguous runs of >= 2 completed SC-owned stages
+  // collapse into one summary row. Daryl acts on the Brenk stages; the
+  // SC-automatic ones that are already done are just history and don't
+  // need a row each (the tall checklist was most of the rail's height).
+  type Row =
+    | { kind: 'stage'; stage: Stage }
+    | { kind: 'sc_done_group'; stages: Stage[] }
+  const grouped: Row[] = []
+  for (const stage of stages) {
+    const hasControl =
+      (stage.label === SUB_VENDOR_STAGE_LABEL && vendorControl) ||
+      (stage.label === VENDOR_NOTIFIED_STAGE_LABEL && notifyControl)
+    const groupable =
+      stage.source === 'SC' && stage.state === 'done' && !hasControl
+    const last = grouped[grouped.length - 1]
+    if (groupable && last?.kind === 'sc_done_group') {
+      last.stages.push(stage)
+    } else if (groupable) {
+      grouped.push({ kind: 'sc_done_group', stages: [stage] })
+    } else {
+      grouped.push({ kind: 'stage', stage })
+    }
+  }
+  const rows: Row[] = grouped.flatMap((row) =>
+    row.kind === 'sc_done_group' && row.stages.length === 1
+      ? [{ kind: 'stage' as const, stage: row.stages[0] }]
+      : [row],
+  )
+
   return (
     <div className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
       <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
@@ -181,7 +214,28 @@ export function WorkflowChecklist({
         </p>
       </header>
       <ul role="list" className="divide-y divide-gray-200 dark:divide-white/10">
-        {stages.map((stage) => {
+        {rows.map((row) => {
+          if (row.kind === 'sc_done_group') {
+            return (
+              <li
+                key={row.stages.map((s) => s.label).join('|')}
+                className="flex items-start gap-3 px-4 py-2.5 text-sm"
+              >
+                <StageIcon state="done" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {row.stages.map((s) => s.label).join(' · ')}
+                    </span>
+                    <span className="rounded-sm bg-gray-100 px-1.5 py-px text-[10px] font-medium text-gray-500 uppercase dark:bg-white/5 dark:text-gray-400">
+                      SC
+                    </span>
+                  </div>
+                </div>
+              </li>
+            )
+          }
+          const stage = row.stage
           const isVendorStage =
             stage.label === SUB_VENDOR_STAGE_LABEL && vendorControl
           const isNotifiedStage =

@@ -16,15 +16,24 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.db.session import get_async_db
 from app.models.invoice import Invoice
 from app.models.work_order import Client, Location, Vendor, WorkOrder, WorkOrderNote
 from app.schemas.work_order import (
+    InvoiceSubmitPreview,
+    InvoiceSubmitRequest,
     InvoiceSummary,
     WorkOrderDetail,
     WorkOrderListResponse,
     WorkOrderNoteRef,
     WorkOrderSummary,
+)
+from app.services.invoice_submit import (
+    InvoiceSubmitError,
+    compute_preview,
+    count_prior_invoices,
+    submit_invoice,
 )
 from app.services.pipeline import (
     STAGE_BY_KEY,
@@ -33,6 +42,7 @@ from app.services.pipeline import (
     stage_filter_clauses,
     stuck_filter_clause,
 )
+from app.services.servicechannel.client import ServiceChannelClient
 from app.services.sync.work_orders import sync_all_work_orders
 
 
@@ -74,6 +84,16 @@ class WorkOrderUpdate(BaseModel):
             "Brenk's chosen markup % on this WO. Range 0-1000 - Daryl's "
             "real-world band is 65-200, but we allow zero and outliers. "
             "Brenk-confidential — never pushed to SC."
+        ),
+    )
+    brenk_total_override: Decimal | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Directly-entered pre-tax total bill — used when Daryl prices a "
+            "WO by the total instead of vendor cost + markup. When set, it is "
+            "the source of truth for the total and the markup % is left "
+            "unknown. Brenk-confidential — never pushed to SC as a breakdown."
         ),
     )
     # Frontend sends `paid: "now"` to stamp paid_at = now(), or
@@ -243,9 +263,7 @@ async def list_work_orders(
         no_open_invoice = and_(
             or_(
                 WorkOrder.sc_invoice_status.is_(None),
-                WorkOrder.sc_invoice_status.notin_(
-                    [*_ACTIVE_INVOICE_STATUSES, "Rejected", "Paid"]
-                ),
+                WorkOrder.sc_invoice_status.notin_([*_ACTIVE_INVOICE_STATUSES, "Rejected", "Paid"]),
             ),
             or_(
                 WorkOrder.primary_status != "INVOICED",
@@ -253,14 +271,25 @@ async def list_work_orders(
             ),
         )
 
+        # "Priced" = a markup % OR a directly-entered total. Either moves a
+        # WO from "ready to mark up" into "marked up, ready to send".
+        unpriced = and_(
+            WorkOrder.brenk_markup_percent.is_(None),
+            WorkOrder.brenk_total_override.is_(None),
+        )
+        priced = or_(
+            WorkOrder.brenk_markup_percent.is_not(None),
+            WorkOrder.brenk_total_override.is_not(None),
+        )
+
         if invoice_tab == "ready_to_markup":
             filters.extend(stage_filter_clauses("ready_to_invoice"))
-            filters.append(WorkOrder.brenk_markup_percent.is_(None))
+            filters.append(unpriced)
             filters.append(no_open_invoice)
             filters.append(not_paid)
         elif invoice_tab == "marked_up":
             filters.extend(stage_filter_clauses("ready_to_invoice"))
-            filters.append(WorkOrder.brenk_markup_percent.is_not(None))
+            filters.append(priced)
             filters.append(no_open_invoice)
             filters.append(not_paid)
         elif invoice_tab == "sent":
@@ -440,16 +469,85 @@ async def _to_detail(db: AsyncSession, wo: WorkOrder) -> WorkOrderDetail:
     detail = WorkOrderDetail.model_validate(wo)
     if wo.sc_work_order_id is not None:
         invoices = (
-            await db.execute(
-                select(Invoice)
-                .where(Invoice.wo_tracking_number == wo.sc_work_order_id)
-                .order_by(
-                    Invoice.sc_updated_date.desc().nullslast(), Invoice.id.desc()
+            (
+                await db.execute(
+                    select(Invoice)
+                    .where(Invoice.wo_tracking_number == wo.sc_work_order_id)
+                    .order_by(Invoice.sc_updated_date.desc().nullslast(), Invoice.id.desc())
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         detail.sc_invoices = [InvoiceSummary.model_validate(inv) for inv in invoices]
     return detail
+
+
+@router.get("/{work_order_id}/invoice-preview", response_model=InvoiceSubmitPreview)
+async def get_invoice_preview(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> InvoiceSubmitPreview:
+    """Preview exactly what submitting this WO's invoice to SC would send.
+
+    Pure computation from local state — no SC call. The confirm dialog
+    renders this verbatim; the submit endpoint recomputes it
+    authoritatively, so the preview can't drift from what's sent.
+    """
+    wo = await _fetch_work_order(db, work_order_id)
+    settings = get_settings()
+    prior = await count_prior_invoices(db, wo, settings.SC_ENVIRONMENT)
+    preview = compute_preview(wo, prior)
+    return InvoiceSubmitPreview(
+        eligible=preview.eligible,
+        problems=preview.problems,
+        invoice_number=preview.invoice_number,
+        labor_amount=preview.labor_amount,
+        material_amount=preview.material_amount,
+        subtotal=preview.subtotal,
+        tax_amount=preview.tax_amount,
+        invoice_total=preview.invoice_total,
+        nte=preview.nte,
+        resolution_text=preview.resolution_text,
+    )
+
+
+@router.post("/{work_order_id}/submit-invoice", response_model=WorkOrderDetail)
+async def submit_work_order_invoice(
+    work_order_id: int,
+    body: InvoiceSubmitRequest,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderDetail:
+    """Submit this WO's invoice to ServiceChannel (POST /v3/invoices).
+
+    Validates server-side (markup set, total <= NTE, resolution text,
+    no active SC invoice), sends the marked-up amounts only — vendor
+    costs and markup % never leave our DB — and records the resulting
+    SC invoice id/number/status on the WO. The invoice webhook then
+    confirms and materializes the full invoice record.
+
+    Returns 400 with an operator-facing message on validation failure
+    or SC rejection (the rejection is also stored on
+    `sc_invoice_last_error`).
+    """
+    wo = await _fetch_work_order(db, work_order_id)
+    settings = get_settings()
+    client = ServiceChannelClient()
+    try:
+        await submit_invoice(
+            db,
+            client,
+            wo,
+            sc_env=settings.SC_ENVIRONMENT,
+            invoice_text=body.invoice_text,
+        )
+    except InvoiceSubmitError as exc:
+        # Persist sc_invoice_last_error when the rejection set it.
+        await db.commit()
+        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await db.commit()
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    return await _to_detail(db, fresh)
 
 
 @router.patch("/{work_order_id}", response_model=WorkOrderDetail)
@@ -507,17 +605,23 @@ async def update_work_order(
     if "brenk_material_cost" in update_data:
         wo.brenk_material_cost = update_data["brenk_material_cost"]
 
+    # A WO is "priced" once it has either a markup % (cost-based path) or a
+    # directly-entered total (override path). brenk_marked_up_at tracks the
+    # first-priced moment across BOTH paths: stamp when the WO transitions
+    # from unpriced -> priced, clear when it goes back to fully unpriced,
+    # leave alone otherwise. Compute the before-state before mutating.
+    was_priced = wo.brenk_markup_percent is not None or wo.brenk_total_override is not None
+
     if "brenk_markup_percent" in update_data:
-        new_pct = update_data["brenk_markup_percent"]
-        was_unset = wo.brenk_markup_percent is None
-        wo.brenk_markup_percent = new_pct
-        # First-time set: stamp the timestamp. Subsequent edits don't
-        # bump it — the first markup-decided moment is what's
-        # operationally meaningful. Clearing (None) also clears the
-        # timestamp so the WO returns to "Ready to mark up" cleanly.
-        if new_pct is None:
+        wo.brenk_markup_percent = update_data["brenk_markup_percent"]
+    if "brenk_total_override" in update_data:
+        wo.brenk_total_override = update_data["brenk_total_override"]
+
+    if "brenk_markup_percent" in update_data or "brenk_total_override" in update_data:
+        now_priced = wo.brenk_markup_percent is not None or wo.brenk_total_override is not None
+        if not now_priced:
             wo.brenk_marked_up_at = None
-        elif was_unset:
+        elif not was_priced:
             wo.brenk_marked_up_at = datetime.now(UTC)
 
     if "paid" in update_data:

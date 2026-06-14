@@ -142,6 +142,16 @@ class ServiceChannelClient:
         """
         return await self._request("GET", f"/v3/workorders/{work_order_id}/notes")
 
+    async def create_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Submit an invoice to ServiceChannel (POST /v3/invoices).
+
+        Returns the SC response — `{"Id": <new invoice id>}` on 201.
+        Raises ServiceChannelError on rejection (4xx body carries the
+        ErrorMessage, e.g. number-format or NTE violations). Write scope
+        confirmed 2026-06-10; see servicechannel-api.md "Spike results".
+        """
+        return await self._request("POST", "/v3/invoices", json=payload)
+
     async def get_work_order_attachments(self, work_order_id: int | str) -> list[dict[str, Any]]:
         """Fetch attachments for a work order.
 

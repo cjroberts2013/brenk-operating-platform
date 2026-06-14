@@ -513,7 +513,14 @@ manual reach-out faster. Two follow-ups to move toward Phase 3
    go-live steps (human SC webhook registration, tunnel smoke test,
    backfill script, field-name confirmation) in
    `docs/architecture/sc-invoice-webhook-sync.md` §12-13. The invoice
-   **submit** path is a separate, independently-buildable piece.
+   **submit** path is also **BUILT (2026-06-11)**: "Submit to
+   ServiceChannel" with a server-computed confirm dialog on the WO
+   detail + the Invoices "Marked up" rows
+   (`app/services/invoice_submit.py`, preview + submit endpoints,
+   `SubmitInvoiceButton`). Marked-up amounts only — vendor costs and
+   markup % never sent. 16 new tests (mocked SC). Invoice number
+   scheme `BRENK{wo_number}` pending Daryl's confirmation; sandbox
+   live-fire pending; prod write-scope re-verify before shipping.
 6. **Phase 2: QuickBooks Integration & Invoice Automation.** The
    bigger next investment. Scope: pull/push invoices to QBO so
    Sue's clipboard goes away end-to-end. Not started — kick off

@@ -57,6 +57,10 @@ export type WorkOrderSummary = {
   brenk_labor_cost: string | null
   brenk_material_cost: string | null
   brenk_markup_percent: string | null
+  /** Directly-entered pre-tax total bill — set when Daryl prices by the
+   *  total instead of vendor cost + markup. When set, it's the total
+   *  source of truth and the markup % is unknown. Brenk-confidential. */
+  brenk_total_override: string | null
   brenk_marked_up_at: string | null
   brenk_paid_at: string | null
   brenk_vendor_notified_at: string | null
@@ -110,6 +114,23 @@ export type InvoiceListResponse = {
   page_size: number
 }
 
+/** Server-computed preview of what submitting a WO's invoice to SC
+ *  would send — rendered verbatim in the confirm dialog. */
+export type InvoiceSubmitPreview = {
+  eligible: boolean
+  problems: string[]
+  invoice_number: string
+  labor_amount: string
+  material_amount: string
+  subtotal: string
+  /** 8.25% TX sales tax on the marked-up subtotal. */
+  tax_amount: string
+  /** subtotal + tax; checked against NTE. */
+  invoice_total: string
+  nte: string | null
+  resolution_text: string | null
+}
+
 export type WorkOrderDetail = {
   id: number
   sc_work_order_id: number
@@ -157,6 +178,9 @@ export type WorkOrderDetail = {
   brenk_labor_cost: string | null
   brenk_material_cost: string | null
   brenk_markup_percent: string | null
+  /** Directly-entered pre-tax total bill. When set, it's the total
+   *  source of truth and the markup % is unknown. Brenk-confidential. */
+  brenk_total_override: string | null
   brenk_marked_up_at: string | null
   brenk_paid_at: string | null
   brenk_vendor_notified_at: string | null
@@ -376,6 +400,10 @@ export type WorkOrderUpdate = {
   /** Decimal as string. Setting auto-stamps brenk_marked_up_at on
    *  first set; subsequent edits don't bump it. Null clears both. */
   brenk_markup_percent?: string | null
+  /** Decimal as string. Directly-entered pre-tax total bill (prices the
+   *  WO without a vendor cost/markup breakdown). Setting it counts as
+   *  "priced" for brenk_marked_up_at. Null clears. Brenk-confidential. */
+  brenk_total_override?: string | null
   /** "now" stamps brenk_paid_at=now(); "clear" resets to null. */
   paid?: 'now' | 'clear'
   /** "now" stamps brenk_vendor_notified_at=now() (Daryl texted/called
