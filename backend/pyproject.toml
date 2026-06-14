@@ -21,6 +21,7 @@ dependencies = [
     "sentry-sdk[fastapi]",
     "structlog",
     "python-dotenv",
+    "openpyxl",
 ]
 
 [project.optional-dependencies]

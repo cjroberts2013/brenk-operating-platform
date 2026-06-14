@@ -449,22 +449,51 @@ The backend feature is built and verified on dev. What landed:
   so the existing Paid-tab / dashboard logic reflects auto-paid with no
   query refactor. `brenk_paid_at` stays a manual override.
 
-## 13. Remaining to go live (not yet done)
+## 13. Remaining to go live
 
-1. **[HUMAN] SC webhook registration** (§2): in Sandbox2 then Production,
-   copy `SC_WEBHOOK_SIGNING_KEY` (per env; `fly secrets set` for prod),
-   register the webhook + Invoice subscription, Ping, Activate.
-2. **Tunnel smoke test** in sandbox (§9): `cloudflared`/`ngrok` →
-   localhost:8000, then create a sandbox invoice and confirm a row
-   appears within ~30 s.
-3. **Backfill** (§8): build `backend/scripts/backfill_invoices.py` and run
-   it against a production UI export.
-4. **Field-name confirmation** (§11): the invoice `Object` field mapping
-   in `invoice_sync.py` was written defensively against the documented
-   shapes; confirm against a real sandbox `InvoiceCreated`/`InvoicePaid`
-   payload once webhooks are flowing and adjust the `_first(...)` keys if
-   needed.
-5. Alerts (§5.3) on invalid_signature / dead_letter / silence.
+### 13a. Backfill script — BUILT (2026-06-14)
+
+`backend/scripts/backfill_invoices.py` is implemented + unit-tested
+(`tests/unit/test_backfill_invoices.py`) and smoke-tested dry-run against
+dev. Highlights: header auto-mapping (prints the detected mapping every
+run), currency/US-date/status normalization, the §8 merge rules
+(webhook-wins / fill-NULLs / idempotent re-run), conservative work-order
+mirroring (NULL columns only — never clobbers a webhook or a real
+submit), failure CSV, and a >2%-failure non-zero exit. **Dry-run by
+default; `--commit` required to write.** `openpyxl` added to deps.
+
+### 13b. PROD DEPLOYMENT GAP found (2026-06-14)
+
+`GET https://brenk-platform-web.fly.dev/api/v1/webhooks/servicechannel`
+returns **404** — the whole webhook feature (receiver, worker sweep, the
+5 invoice tables, the `work_orders.sc_invoice_*` columns) is **committed
+locally but not deployed to prod** (commits `3dbe30a`, `497c580` are
+ahead of `origin/main`; nothing deployed). So the registration in §2
+*cannot* succeed until prod has the code. This is now the first step.
+
+### 13c. Go-live order (refined)
+
+1. **Deploy backend to prod Fly** (`fly deploy` for web + worker). The
+   `release_command = alembic upgrade head` auto-applies the invoice +
+   `work_orders` migrations. Verify the prod endpoint then returns 200.
+   *(Frontend: deploy the invoice-centric Invoices UI to Vercel too, for
+   the full demo surface.)*
+2. **[HUMAN] SC webhook registration** (§2): Production Provider
+   Automation → copy `SC_WEBHOOK_SIGNING_KEY`, register the webhook +
+   Invoice subscription, Inactive at first.
+3. `fly secrets set SC_WEBHOOK_SIGNING_KEY=… -a brenk-platform-web` (the
+   receiver lives on the web app; the worker doesn't need the key).
+   `SC_ENVIRONMENT=production` is already set in prod.
+4. **Ping** from the SC UI → confirm 200 → **Activate**. Confirm the
+   first real event lands with a valid signature.
+5. **[HUMAN] Export** prod invoices (Provider Automation → Invoices →
+   Excel/CSV, all subscribers/statuses, full date range).
+6. **Backfill** (§8 / §13a): dry-run, eyeball the mapping + summary, then
+   re-run with `--commit --database-url "$PROD_DATABASE_URL"`.
+7. **Field-name confirmation** (§11): confirm `invoice_sync.py`'s
+   `_first(...)` keys against a real sandbox/prod payload once events
+   flow; adjust if SC's field names differ from the documented shapes.
+8. Alerts (§5.3) on invalid_signature / dead_letter / silence.
 
 Separately, the **submit** path (`servicechannel-api.md` "Spike results
 2026-06-10") is an independent Phase 1.5 piece, still buildable on its own.
