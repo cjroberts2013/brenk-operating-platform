@@ -36,12 +36,14 @@ import {
   GlobeAltIcon,
   HomeIcon,
   ClipboardDocumentListIcon,
+  QuestionMarkCircleIcon,
   UsersIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { ChevronDownIcon } from '@heroicons/react/20/solid'
 
 import { ContextualSearch } from './ContextualSearch'
+import { HelpDrawer } from './HelpDrawer'
 
 type NavItem = {
   name: string
@@ -176,6 +178,7 @@ export default function AppShell({
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [navCollapsed, setNavCollapsed] = useState(initialNavCollapsed)
+  const [helpOpen, setHelpOpen] = useState(false)
   const pathname = usePathname()
 
   function toggleNavCollapsed() {
@@ -188,6 +191,12 @@ export default function AppShell({
 
   return (
     <div>
+      <HelpDrawer
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        pathname={pathname}
+      />
+
       {/* Mobile sidebar (slide-over) */}
       <Dialog
         open={sidebarOpen}
@@ -301,6 +310,15 @@ export default function AppShell({
             <ContextualSearch />
 
             <div className="flex items-center gap-x-4 lg:gap-x-6">
+              <button
+                type="button"
+                onClick={() => setHelpOpen(true)}
+                className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:text-gray-400 dark:hover:text-gray-300"
+              >
+                <span className="sr-only">Open help for this page</span>
+                <QuestionMarkCircleIcon aria-hidden="true" className="size-6" />
+              </button>
+
               <button
                 type="button"
                 className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:text-gray-400 dark:hover:text-gray-300"
