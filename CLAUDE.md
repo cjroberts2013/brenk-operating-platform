@@ -294,6 +294,19 @@ stays public and the dashboard stays locked.
   `NEXT_PUBLIC_SC_WEB_URL` was `sc.servicechannel.com` (dead host) →
   corrected to **`https://www.servicechannel.com`** in Vercel +
   `.env.local.example`. "Open in ServiceChannel" works in prod again.
+- **Invoices list refinement** (commit `f3fe254`): the invoice-centric
+  list was one long scroll dominated by Paid. Added status tabs with
+  live counts — **Awaiting payment** (default) / Paid / Rejected / All
+  ("awaiting" reuses `ACTIVE_INVOICE_STATUSES` so Invoices page +
+  dashboard + WO queue agree) — plus debounced search (invoice #, WO #,
+  location, trade) and 25/page pagination. Backend `invoices` list
+  endpoint gained `status_group` + `q` params (6 integration tests);
+  frontend added `InvoiceStatusTabs` / `InvoiceSearch` /
+  `InvoicePagination`, all server-rendered except the search box. Both
+  surfaces deployed to prod. Minor known edge: switching the lower
+  "Work orders to invoice" tabs resets the invoice-list filter to its
+  default (the two sections share the URL but their nav links don't
+  cross-preserve params).
 - Known loose ends: two self-test rows linger in prod `webhook_events`
   (a `WebhookTest` + an `invalid_signature` probe — invisible to the UI,
   cleanup pending explicit authorization); first real webhook event
