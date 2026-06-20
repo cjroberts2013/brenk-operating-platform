@@ -9,6 +9,8 @@
 import { apiFetch } from './server'
 import type {
   InvoiceSubmitPreview,
+  VendorMessage,
+  WorkOrderAttachment,
   WorkOrderDetail,
   WorkOrderListParams,
   WorkOrderListResponse,
@@ -30,6 +32,32 @@ export function getWorkOrder(id: number): Promise<WorkOrderDetail> {
 
 export function listWorkOrderNotes(id: number): Promise<WorkOrderNoteRef[]> {
   return apiFetch<WorkOrderNoteRef[]>(`/api/v1/work-orders/${id}/notes`)
+}
+
+export function listWorkOrderAttachments(
+  id: number,
+): Promise<WorkOrderAttachment[]> {
+  return apiFetch<WorkOrderAttachment[]>(
+    `/api/v1/work-orders/${id}/attachments`,
+  )
+}
+
+export function getVendorMessage(id: number): Promise<VendorMessage> {
+  return apiFetch<VendorMessage>(`/api/v1/work-orders/${id}/vendor-message`)
+}
+
+export type VendorEmailResult = {
+  sent: boolean
+  to_email: string
+  photos_attached: number
+  photos_total: number
+}
+
+export function sendVendorEmail(id: number): Promise<VendorEmailResult> {
+  return apiFetch<VendorEmailResult>(
+    `/api/v1/work-orders/${id}/send-vendor-email`,
+    { method: 'POST' },
+  )
 }
 
 export function getWorkOrderSyncStatus(): Promise<WorkOrderSyncStatus> {

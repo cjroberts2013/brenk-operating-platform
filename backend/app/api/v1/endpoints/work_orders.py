@@ -5,11 +5,14 @@ queries return data that's already been transformed from SC payloads
 into our schema — see `app.services.sync` for the sync pipeline.
 """
 
+import base64
+import mimetypes
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
@@ -19,16 +22,26 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.db.session import get_async_db
 from app.models.invoice import Invoice
-from app.models.work_order import Client, Location, Vendor, WorkOrder, WorkOrderNote
+from app.models.work_order import (
+    Client,
+    GateCode,
+    Location,
+    Vendor,
+    WorkOrder,
+    WorkOrderNote,
+)
 from app.schemas.work_order import (
     InvoiceSubmitPreview,
     InvoiceSubmitRequest,
     InvoiceSummary,
+    VendorMessage,
+    WorkOrderAttachment,
     WorkOrderDetail,
     WorkOrderListResponse,
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
+from app.services.email import is_valid_email, send_email
 from app.services.invoice_submit import (
     InvoiceSubmitError,
     compute_preview,
@@ -44,6 +57,13 @@ from app.services.pipeline import (
 )
 from app.services.servicechannel.client import ServiceChannelClient
 from app.services.sync.work_orders import sync_all_work_orders
+from app.services.vendor_message import (
+    MAX_TOTAL_ATTACHMENT_BYTES,
+    compose_vendor_message,
+    text_to_html,
+)
+
+logger = structlog.get_logger(__name__)
 
 
 class WorkOrderUpdate(BaseModel):
@@ -673,3 +693,304 @@ async def list_work_order_notes(
     )
     rows = (await db.execute(stmt)).scalars().all()
     return [WorkOrderNoteRef.model_validate(row) for row in rows]
+
+
+async def _sc_work_order_id(db: AsyncSession, work_order_id: int) -> int:
+    """Resolve our WO id to its SC numeric id, or raise 404."""
+    sc_id = (
+        await db.execute(select(WorkOrder.sc_work_order_id).where(WorkOrder.id == work_order_id))
+    ).scalar_one_or_none()
+    if sc_id is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"work order {work_order_id} not found",
+        )
+    return sc_id
+
+
+def _sanitize_filename(name: str | None, fallback: str) -> str:
+    """Strip header-breaking characters from a download filename."""
+    cleaned = (name or "").replace("\r", "").replace("\n", "").replace('"', "").strip()
+    return cleaned or fallback
+
+
+async def _active_gate_codes(db: AsyncSession, location_id: int | None) -> list[GateCode]:
+    """The active gate codes for a location, oldest first (empty if none)."""
+    if location_id is None:
+        return []
+    return list(
+        (
+            await db.execute(
+                select(GateCode)
+                .where(GateCode.location_id == location_id, GateCode.is_active.is_(True))
+                .order_by(GateCode.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+@router.get("/{work_order_id}/attachments", response_model=list[WorkOrderAttachment])
+async def list_work_order_attachments(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> list[WorkOrderAttachment]:
+    """List a work order's attachments, fetched live from ServiceChannel.
+
+    404 if the WO doesn't exist; empty list if it has none. The raw SC
+    `Uri` (a short-lived presigned URL) is never returned — files are
+    fetched through the download endpoint below.
+    """
+    sc_id = await _sc_work_order_id(db, work_order_id)
+    client = ServiceChannelClient()
+    try:
+        raw = await client.get_work_order_attachments(sc_id)
+    except Exception as exc:
+        logger.warning("sc_attachments_list_failed", work_order_id=work_order_id, error=str(exc))
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't load attachments from ServiceChannel.",
+        ) from exc
+
+    items: list[WorkOrderAttachment] = []
+    for att in raw:
+        name = att.get("Name")
+        items.append(
+            WorkOrderAttachment(
+                id=att["Id"],
+                name=name,
+                description=att.get("Description"),
+                note_id=att.get("NoteId"),
+                timestamp=att.get("TimeStamp"),
+                is_invoice_digital_copy=bool(att.get("IsInvoiceDigitalCopy", False)),
+                upload_by=att.get("UploadBy"),
+                content_type=(mimetypes.guess_type(name)[0] if name else None),
+            )
+        )
+    return items
+
+
+@router.get("/{work_order_id}/attachments/{attachment_id}/download")
+async def download_work_order_attachment(
+    work_order_id: int,
+    attachment_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+    download: Annotated[bool, Query(description="Force a download (attachment) vs inline")] = False,
+) -> Response:
+    """Stream an attachment's bytes through our backend.
+
+    Resolves a fresh presigned `Uri` from SC at request time (they expire
+    ~30 min), fetches the bytes server-side, and returns them with the
+    right content type + filename. Keeps the SC token + transient Uri off
+    the client. 404 if the WO or attachment id is unknown.
+    """
+    sc_id = await _sc_work_order_id(db, work_order_id)
+    client = ServiceChannelClient()
+    try:
+        raw = await client.get_work_order_attachments(sc_id)
+    except Exception as exc:
+        logger.warning("sc_attachments_list_failed", work_order_id=work_order_id, error=str(exc))
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't load attachments from ServiceChannel.",
+        ) from exc
+
+    match = next((a for a in raw if a.get("Id") == attachment_id), None)
+    if match is None or not match.get("Uri"):
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"attachment {attachment_id} not found for work order {work_order_id}",
+        )
+
+    try:
+        content, content_type = await client.fetch_attachment_bytes(match["Uri"])
+    except Exception as exc:
+        logger.warning("sc_attachment_fetch_failed", attachment_id=attachment_id, error=str(exc))
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't download the attachment from ServiceChannel.",
+        ) from exc
+
+    filename = _sanitize_filename(match.get("Name"), f"attachment-{attachment_id}")
+    disposition = "attachment" if download else "inline"
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
+
+
+@router.get("/{work_order_id}/vendor-message", response_model=VendorMessage)
+async def get_vendor_message(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> VendorMessage:
+    """Compose the ready-to-send vendor notification message for a WO.
+
+    Gathers the WO + location (address) + active gate codes + attachment
+    names + assigned vendor contact, and returns one plain-text body (for
+    SMS or email) plus a suggested subject. Attachments are best-effort —
+    an SC hiccup just drops the photo names, not the whole message.
+    """
+    wo = await _fetch_work_order(db, work_order_id)
+    active_gate_codes = await _active_gate_codes(db, wo.location_id)
+
+    attachments: list[dict] = []
+    if wo.attachments_count > 0:
+        try:
+            attachments = await ServiceChannelClient().get_work_order_attachments(
+                wo.sc_work_order_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "vendor_message_attachments_failed", work_order_id=work_order_id, error=str(exc)
+            )
+
+    vendor = wo.assigned_vendor
+    composed = compose_vendor_message(
+        wo=wo,
+        store_id=wo.location.store_id if wo.location else None,
+        location_name=wo.location.name if wo.location else None,
+        location_raw_data=wo.location.raw_data if wo.location else None,
+        trade_name=wo.trade.name if wo.trade else None,
+        active_gate_codes=active_gate_codes,
+        attachments=attachments,
+        vendor=vendor,
+    )
+    return VendorMessage(
+        subject=composed.subject,
+        body=composed.body,
+        to_phone=vendor.phone if vendor else None,
+        to_email=vendor.email if vendor else None,
+        contact_preference=vendor.contact_preference if vendor else None,
+        photo_count=len(attachments),
+    )
+
+
+class VendorEmailResult(BaseModel):
+    """Result of POST /work-orders/{id}/send-vendor-email."""
+
+    sent: bool
+    to_email: str
+    photos_attached: int
+    photos_total: int
+
+
+@router.post("/{work_order_id}/send-vendor-email", response_model=VendorEmailResult)
+async def send_vendor_email(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> VendorEmailResult:
+    """Email the composed vendor notification (photos attached) via Resend.
+
+    Sends to the assigned vendor's email with Daryl as reply-to, attaches
+    the WO's photos (best-effort, capped), then stamps
+    `brenk_vendor_notified_at`. 400 if no vendor / no vendor email; 502 if
+    the email fails to send.
+    """
+    wo = await _fetch_work_order(db, work_order_id)
+    vendor = wo.assigned_vendor
+    if vendor is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Assign a sub-vendor before emailing them.",
+        )
+    if not vendor.email:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"{vendor.name} has no email on file. Add one on the vendor record.",
+        )
+    if not is_valid_email(vendor.email):
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{vendor.name}'s email ({vendor.email}) doesn't look valid. "
+                "Fix it on the vendor record before sending."
+            ),
+        )
+
+    active_gate_codes = await _active_gate_codes(db, wo.location_id)
+
+    # Raw SC attachments (carry the Uri + Name we need to fetch the bytes).
+    raw_attachments: list[dict] = []
+    if wo.attachments_count > 0:
+        try:
+            raw_attachments = await ServiceChannelClient().get_work_order_attachments(
+                wo.sc_work_order_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "vendor_email_attachments_failed", work_order_id=work_order_id, error=str(exc)
+            )
+
+    composed = compose_vendor_message(
+        wo=wo,
+        store_id=wo.location.store_id if wo.location else None,
+        location_name=wo.location.name if wo.location else None,
+        location_raw_data=wo.location.raw_data if wo.location else None,
+        trade_name=wo.trade.name if wo.trade else None,
+        active_gate_codes=active_gate_codes,
+        attachments=raw_attachments,
+        vendor=vendor,
+    )
+
+    # Fetch + base64 the photo bytes, capped so a huge set degrades to
+    # fewer attachments rather than a rejected send.
+    client = ServiceChannelClient()
+    attachments_payload: list[dict[str, str]] = []
+    total_bytes = 0
+    for att in raw_attachments:
+        uri = att.get("Uri")
+        if not uri:
+            continue
+        try:
+            content, _ctype = await client.fetch_attachment_bytes(uri)
+        except Exception as exc:
+            logger.warning(
+                "vendor_email_attachment_fetch_failed",
+                attachment_id=att.get("Id"),
+                error=str(exc),
+            )
+            continue
+        if total_bytes + len(content) > MAX_TOTAL_ATTACHMENT_BYTES:
+            logger.warning("vendor_email_attachment_cap_reached", work_order_id=work_order_id)
+            break
+        total_bytes += len(content)
+        attachments_payload.append(
+            {
+                "filename": _sanitize_filename(att.get("Name"), f"photo-{att.get('Id')}"),
+                "content": base64.b64encode(content).decode("ascii"),
+            }
+        )
+
+    settings = get_settings()
+    sent = await send_email(
+        subject=composed.subject,
+        html=text_to_html(composed.body),
+        text=composed.body,
+        to=vendor.email,
+        from_email=settings.VENDOR_FROM_EMAIL,
+        reply_to=settings.QUOTE_TO_EMAIL,  # vendor replies go to Daryl
+        attachments=attachments_payload or None,
+    )
+    if not sent:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't send the email (check the Resend configuration).",
+        )
+
+    wo.brenk_vendor_notified_at = datetime.now(UTC)
+    await db.commit()
+    logger.info(
+        "vendor_email_sent",
+        work_order_id=work_order_id,
+        to=vendor.email,
+        photos_attached=len(attachments_payload),
+    )
+    return VendorEmailResult(
+        sent=True,
+        to_email=vendor.email,
+        photos_attached=len(attachments_payload),
+        photos_total=len(raw_attachments),
+    )

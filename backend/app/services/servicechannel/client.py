@@ -153,14 +153,41 @@ class ServiceChannelClient:
         return await self._request("POST", "/v3/invoices", json=payload)
 
     async def get_work_order_attachments(self, work_order_id: int | str) -> list[dict[str, Any]]:
-        """Fetch attachments for a work order.
+        """List a work order's attachments.
 
-        NOTE: The v3 endpoint returns UnsupportedApiVersion. The correct version is TBD —
-        likely v2. Update this method once we confirm the right endpoint.
+        GET /v3/odata/workorders({id})/attachments — the read lives under
+        OData (the versioned `/workorders/{id}/attachments` path is POST-only,
+        for uploads). Authorized for our Provider token (verified 2026-06-20).
+
+        Each item carries: Id, Name, Description, TimeStamp, NoteId,
+        Visibility, IsInvoiceDigitalCopy, UploadBy, and `Uri` — a short-lived
+        (~30 min) presigned Azure Blob SAS URL to the file. Resolve the Uri at
+        download time; it expires and carries a signature, so never persist it.
         """
-        raise NotImplementedError(
-            "Attachment endpoint version pending discovery — v3 returns UnsupportedApiVersion"
-        )
+        payload = await self._request("GET", f"/v3/odata/workorders({work_order_id})/attachments")
+        if isinstance(payload, dict):
+            value = payload.get("value")
+            return value if isinstance(value, list) else []
+        if isinstance(payload, list):
+            return payload
+        return []
+
+    async def fetch_attachment_bytes(self, uri: str) -> tuple[bytes, str]:
+        """Download an attachment's bytes from its presigned SAS `Uri`.
+
+        Returns (content, content_type). The Uri is self-authenticating via
+        its `sig` query param — we send NO Authorization header (a Bearer
+        breaks SAS auth in some environments). Raises ServiceChannelError on
+        a non-2xx so callers surface a clean message.
+        """
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True) as client:
+            response = await client.get(uri)
+        if response.status_code >= 400:
+            raise ServiceChannelError(
+                f"attachment fetch failed: {response.status_code} {response.text[:200]}"
+            )
+        content_type = response.headers.get("content-type", "application/octet-stream")
+        return response.content, content_type
 
     # -------------------------------------------------------------------------
     # Internal HTTP machinery

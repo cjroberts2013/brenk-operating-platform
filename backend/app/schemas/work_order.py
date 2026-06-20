@@ -268,6 +268,41 @@ class WorkOrderListResponse(BaseModel):
     page_size: int
 
 
+class VendorMessage(BaseModel):
+    """A ready-to-send vendor notification message for a work order.
+
+    `body` is one plain-text block that pastes into SMS or email; `subject`
+    is the suggested email subject. The `to_*`/`contact_preference` fields
+    are conveniences for prefilled sms:/mailto: links and (later) auto-send.
+    """
+
+    subject: str
+    body: str
+    to_phone: str | None
+    to_email: str | None
+    contact_preference: str | None
+    photo_count: int
+
+
+class WorkOrderAttachment(BaseModel):
+    """A file attached to a work order (from SC's OData attachments list).
+
+    The raw SC `Uri` (a short-lived presigned SAS URL) is deliberately NOT
+    exposed — the browser downloads through our proxy endpoint, which
+    resolves a fresh Uri server-side. `content_type` is guessed from the
+    file name for client-side icon/preview hints.
+    """
+
+    id: int
+    name: str | None
+    description: str | None
+    note_id: int | None
+    timestamp: datetime | None
+    is_invoice_digital_copy: bool
+    upload_by: str | None
+    content_type: str | None
+
+
 class WorkOrderNoteRef(_OrmModel):
     """A note attached to a work order. Returned by /work-orders/{id}/notes."""
 

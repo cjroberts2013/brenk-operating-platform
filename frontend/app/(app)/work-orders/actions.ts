@@ -4,7 +4,11 @@ import { revalidatePath } from 'next/cache'
 
 import { ApiError } from '@/lib/api/server'
 import { patchWorkOrder } from '@/lib/api/vendors'
-import { syncWorkOrdersFromSc } from '@/lib/api/work-orders'
+import {
+  sendVendorEmail,
+  syncWorkOrdersFromSc,
+  type VendorEmailResult,
+} from '@/lib/api/work-orders'
 import type { WorkOrderSyncSummary } from '@/lib/api/types'
 
 export type AssignVendorState = {
@@ -47,6 +51,21 @@ export async function assignVendorAction(
   revalidatePath('/work-orders')
   revalidatePath('/vendors')
   return { error: null, attempt }
+}
+
+
+export async function sendVendorEmailAction(
+  workOrderId: number,
+): Promise<{ result?: VendorEmailResult; error?: string }> {
+  try {
+    const result = await sendVendorEmail(workOrderId)
+    // Refresh the detail page — the WO is now marked vendor-notified.
+    revalidatePath(`/work-orders/${workOrderId}`)
+    return { result }
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
 }
 
 

@@ -3,9 +3,11 @@ import { notFound } from 'next/navigation'
 
 import { ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/20/solid'
 
+import { AttachmentsSection } from '@/components/work-orders/AttachmentsSection'
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
+import { MessageVendorCard } from '@/components/work-orders/MessageVendorCard'
 import { NextStepCard } from '@/components/work-orders/NextStepCard'
 import {
   BILLING_STEP_KINDS,
@@ -19,9 +21,12 @@ import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
 import { ApiError } from '@/lib/api/server'
 import { listVendors } from '@/lib/api/vendors'
 import {
+  getVendorMessage,
   getWorkOrder,
+  listWorkOrderAttachments,
   listWorkOrderNotes,
 } from '@/lib/api/work-orders'
+import type { VendorMessage, WorkOrderAttachment } from '@/lib/api/types'
 import { money, relativeTime, shortDate } from '@/lib/format'
 
 const SC_WEB_URL =
@@ -69,6 +74,30 @@ export default async function WorkOrderDetailPage({
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound()
     throw err
+  }
+
+  // Attachments live in ServiceChannel, fetched on demand — only when the
+  // WO actually has any (avoids an SC round-trip on every WO view). The
+  // call is best-effort: an SC hiccup shouldn't 500 the whole page.
+  let attachments: WorkOrderAttachment[] = []
+  let attachmentsFailed = false
+  if (wo.attachments_count > 0) {
+    try {
+      attachments = await listWorkOrderAttachments(wo.id)
+    } catch {
+      attachmentsFailed = true
+    }
+  }
+
+  // Vendor message — only once a sub-vendor is assigned. Best-effort: it
+  // makes a live SC call for photo names, so a hiccup just hides the card.
+  let vendorMessage: VendorMessage | null = null
+  if (wo.assigned_vendor) {
+    try {
+      vendorMessage = await getVendorMessage(wo.id)
+    } catch {
+      vendorMessage = null
+    }
   }
 
   const locationLine = [wo.location?.store_id, wo.location?.name]
@@ -198,6 +227,14 @@ export default async function WorkOrderDetailPage({
             ) : null}
           </section>
 
+          {wo.attachments_count > 0 || attachmentsFailed ? (
+            <AttachmentsSection
+              workOrderId={wo.id}
+              attachments={attachments}
+              failed={attachmentsFailed}
+            />
+          ) : null}
+
           <NotesTimeline notes={notes} />
         </div>
 
@@ -220,6 +257,14 @@ export default async function WorkOrderDetailPage({
               />
             }
           />
+
+          {vendorMessage ? (
+            <MessageVendorCard
+              workOrderId={wo.id}
+              message={vendorMessage}
+              attachments={attachments}
+            />
+          ) : null}
 
           <MarkupHelper wo={wo} defaultOpen={markupOpen} />
 

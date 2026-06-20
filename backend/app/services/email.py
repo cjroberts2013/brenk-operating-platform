@@ -13,6 +13,8 @@ Design notes:
 
 from __future__ import annotations
 
+import re
+
 import httpx
 import structlog
 
@@ -23,6 +25,16 @@ logger = structlog.get_logger(__name__)
 _RESEND_ENDPOINT = "https://api.resend.com/emails"
 _TIMEOUT_SECONDS = 15.0
 
+# Loose email check — same approach as the storefront quote form. Good
+# enough to reject obvious junk before we hand an address to Resend;
+# true deliverability is proven by whether the reply lands, not by regex.
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def is_valid_email(email: str | None) -> bool:
+    """True if `email` is a plausibly-valid address (loose format check)."""
+    return bool(email and _EMAIL_PATTERN.match(email.strip()))
+
 
 async def send_email(
     *,
@@ -30,12 +42,22 @@ async def send_email(
     html: str,
     text: str | None = None,
     reply_to: str | None = None,
+    to: str | list[str] | None = None,
+    from_email: str | None = None,
+    attachments: list[dict[str, str]] | None = None,
 ) -> bool:
-    """Send one email to the configured recipient via Resend.
+    """Send one email via Resend.
+
+    `to` defaults to the configured quote recipient (Daryl) for the
+    storefront lead path; pass an explicit address (e.g. a vendor's) to
+    send elsewhere. `from_email` overrides the sender (defaults to
+    QUOTE_FROM_EMAIL); pass a different verified-domain address for other
+    flows. `attachments` is Resend's shape: a list of
+    `{"filename": str, "content": <base64 str>}`.
 
     Returns True on a 2xx from Resend, False otherwise (including when
-    no API key is configured). Never raises — email is best-effort here
-    and the caller has already persisted/logged the lead.
+    no API key is configured). Never raises — email is best-effort and
+    callers have already persisted/logged the underlying record.
 
     Always pass `text` when you can: a plain-text alternative alongside
     the HTML measurably improves deliverability (HTML-only mail is a
@@ -47,9 +69,10 @@ async def send_email(
         logger.warning("email.skip_no_api_key", subject=subject)
         return False
 
+    recipients = [to] if isinstance(to, str) else (to or [settings.QUOTE_TO_EMAIL])
     payload: dict[str, object] = {
-        "from": settings.QUOTE_FROM_EMAIL,
-        "to": [settings.QUOTE_TO_EMAIL],
+        "from": from_email or settings.QUOTE_FROM_EMAIL,
+        "to": recipients,
         "subject": subject,
         "html": html,
     }
@@ -57,6 +80,8 @@ async def send_email(
         payload["text"] = text
     if reply_to:
         payload["reply_to"] = reply_to
+    if attachments:
+        payload["attachments"] = attachments
 
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
@@ -78,5 +103,5 @@ async def send_email(
         )
         return False
 
-    logger.info("email.sent", subject=subject, to=settings.QUOTE_TO_EMAIL)
+    logger.info("email.sent", subject=subject, to=recipients)
     return True

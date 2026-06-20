@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     QUOTE_FROM_EMAIL: str = "Brenk Facility Services <quotes@brenkfacilityservices.com>"
     QUOTE_TO_EMAIL: str = "daryl@brenkfacilityservices.com"
+    # Sender for vendor work-order notification emails. Same verified domain
+    # as QUOTE_FROM_EMAIL (domain verification covers every address @ it, so
+    # no extra Resend setup needed) but a dedicated mailbox so vendors see a
+    # purpose-built "from".
+    VENDOR_FROM_EMAIL: str = "Brenk Facility Services <workorder@brenkfacilityservices.com>"
 
     # -------------------------------------------------------------------------
     # Observability
