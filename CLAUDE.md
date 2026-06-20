@@ -313,6 +313,45 @@ stays public and the dashboard stays locked.
   should be checked against `invoice_sync.py`'s field mapping (spec §13c
   step 7); §5.3 alerts not yet wired.
 
+**Completed (2026-06-20, dev — NOT yet deployed to prod):**
+- **Locations database + dashboard tab.** New `Locations` tab (list +
+  per-location detail with related WOs, paginated). The `locations` table
+  gained Brenk enrichment — district-manager name/phone/email, a 3-tier
+  `rating` (good/watch/problem), running `description` — plus a new
+  `gate_codes` table with an invalidation lifecycle (codes are retired,
+  never deleted; multiple active allowed). Migration `b9f20eb0f4b7`
+  (columns + table + 2 indexes + RLS). **Sync hardening:** `upsert_location`
+  now writes an explicit SC-field allowlist so the WO sync can never clobber
+  the enrichment fields/gate codes (regression-tested). Address surfaced
+  from `raw_data` (shared `app/services/addresses.py`).
+- **Flat-rate invoicing.** `invoice_submit.build_payload` now sends SC's
+  **Standard** (totals-only) form — no synthetic `Labors[]` hours/rate
+  line — so client invoices read as a flat amount (per Daryl). Trade-off:
+  CubeSmart's category-gated WOs would need Line Item (Option 2) if ever hit.
+- **Status color:** `COMPLETED · PENDING CONFIRMATION` now renders orange
+  (SC "work complete, awaiting store"); `CONFIRMED` stays green.
+- **Work-order attachments (SC blocker RESOLVED).** GET lives under OData
+  (`/v3/odata/workorders({id})/attachments`); `Uri` is a short-lived
+  presigned Azure SAS link. Authorized for our Provider token (sandbox +
+  prod, verified). WO detail shows an Attachments section; downloads stream
+  through a backend proxy + a Next route handler (keeps the SC token/Uri
+  server-side). Probe: `backend/scripts/probe_sc_attachments.py`.
+- **Vendor notification message + email auto-send.** Backend composes a
+  ready-to-send message (WO #, store + address, active gate code, parsed
+  problem — last `/`-segment of the SC description — and photo names),
+  `GET /work-orders/{id}/vendor-message`. The WO detail "Message vendor"
+  card: vendors who **prefer email** get a review-and-confirm dialog that
+  sends via Resend with photos attached (from `workorder@brenkfacility
+  services.com`, reply-to Daryl, vendor email format-validated first) and
+  auto-stamps `brenk_vendor_notified_at`; other vendors keep the manual
+  copy + prefilled `sms:`/`mailto:` + downloadable photos. Precursor to
+  Phase 3 Twilio/auto-send.
+- 177 backend tests pass. **Deploy note:** needs `fly deploy` (applies the
+  `b9f20eb0f4b7` migration + new endpoints) and `fly secrets set
+  VENDOR_FROM_EMAIL=…`; until the backend is deployed, the prod Locations
+  tab will error and attachments/vendor-message stay inert (both degrade
+  gracefully on the WO detail).
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)
@@ -365,8 +404,15 @@ Documented in `docs/architecture/servicechannel-api.md`. Highlights:
 - `Status.Primary` + `Status.Extended` together form the real status state
 - Top-level `LocationId` is unreliable (often `0`) — use nested `Location.Id`
 - Every timestamp comes in UTC + DTO pairs — store UTC
-- **Attachments endpoint not yet found.** v1, v2, v3, and unversioned all
-  return errors. Note attachments are reachable via the notes endpoint though.
+- **Attachments — RESOLVED (2026-06-20).** The GET lives under OData:
+  `GET /v3/odata/workorders({id})/attachments` (the versioned
+  `/v3/workorders/{id}/attachments` path is POST-only, which is why earlier
+  GET probes failed). Each item has `Id`/`Name`/`NoteId`/`Uri`/…, where `Uri`
+  is a short-lived presigned Azure Blob SAS URL — fetch with a plain GET, no
+  Bearer. Authorized for our Provider token in sandbox + prod. Built: a WO
+  detail Attachments section + backend list/download proxy
+  (`scripts/probe_sc_attachments.py` re-runs the probe). Full details in
+  `docs/architecture/servicechannel-api.md` → "Attachments — RESOLVED".
 - The `limit` param on `/v3/workorders` may not be honored as expected —
   observed returning 50 records when 5 were requested
 

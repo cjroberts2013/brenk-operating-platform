@@ -24,7 +24,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd backend && .venv/bin/procrastinate --app=app.workers.app worker"
+        "cd backend && PYTHONPATH=. .venv/bin/procrastinate --app=app.workers.app.procrastinate_app worker"
       ],
       "port": 0
     }

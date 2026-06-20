@@ -87,24 +87,42 @@ enum, meaning TBD), `Attachments` array (notes can carry attachments),
 
 ## Endpoints (To Be Resolved)
 
-### Attachments
-**Status: no working endpoint found.** Tried during Phase 1 exploration:
-- `GET /v3/workorders/{id}/attachments` → `UnsupportedApiVersion`
-- `GET /v2/workorders/{id}/attachments` → does not work
-- `GET /v1/workorders/{id}/attachments` → does not work
-- `GET /workorders/{id}/attachments` (no version) → does not work
+### Attachments — RESOLVED (2026-06-20)
 
-What we do know:
-- The WO detail response includes `Attachments.Count.Total` and `Attachments.Count.Own`, so attachments exist as a concept
-- Individual `Note` objects in the notes endpoint have an `Attachments` array — so some attachments are reachable via the notes endpoint
-- `IsAttachmentNote` boolean exists on notes, suggesting note-attached files are the primary delivery mechanism
+**Status: working. Read + download authorized for our Provider token in
+sandbox AND prod** (probed against WO 343852740, which has one attachment).
 
-Action items before Phase 2 (where attachments matter most for invoice parsing):
-- Re-check the Swagger UI at `https://developer.servicechannel.com/swagger/ui/index?version=3` for any attachment-related routes we missed (may be under a different resource path)
-- Reach out to ServiceChannel support to confirm the correct endpoint or whether attachments are only accessible via notes
-- Look for a webhook event for new attachments — may be cleaner than polling anyway
+The earlier "no endpoint found" was a path mistake: the GET lives under
+**OData**, not the versioned path. `GET /v3/workorders/{id}/attachments`
+returns `UnsupportedApiVersion` because that versioned path is **POST-only**
+(upload). The list is:
 
-For Phase 1, we can extract attachment metadata from notes (the `Attachments` array on each note record) and store it, even without a way to fetch the actual files yet. Files themselves can wait until the endpoint is resolved.
+```
+GET /v3/odata/workorders({workorderId})/attachments
+→ 200: [ { "Id": int, "Name": str, "Description": str, "TimeStamp": iso,
+           "Uri": str, "NoteId": int|null, "Visibility": int,
+           "IsInvoiceDigitalCopy": bool, "UploadBy": str } ]
+```
+
+- **`Uri` is a short-lived (~30 min) presigned Azure Blob SAS URL**
+  (`storage.servicechannel.com/workorders/{guid}?sv=…&se=…&sr=b&sp=r&sig=…`),
+  self-authenticating via its `sig` query param. Fetch it with a **plain GET
+  and NO `Authorization` header** — in sandbox, adding a Bearer made Azure
+  return `400` (dual-auth). The SAS carries the content-type and a
+  content-disposition filename. Resolve it at download time; never persist it.
+- Sandbox storage holds attachment *metadata* but not always the bytes (the
+  probe's sandbox Uri 404'd); prod returned `200 image/jpeg, 3.34 MB`.
+- Image previews: `GET /v3/workorders/{id}/attachments/{attachmentId}/thumbnail
+  ?width&height&mode={None|Max|Pad|Crop|Carve|Stretch}&imageFormat`.
+- 401 body uses `ErrorCode: "NotAllowed"` (+ "504 security permissions") if a
+  token lacks scope — ours has it.
+
+**Implemented:** `ServiceChannelClient.get_work_order_attachments()` +
+`fetch_attachment_bytes(uri)`; backend `GET /work-orders/{id}/attachments`
+(list, hides the Uri) + `…/{attachment_id}/download` (resolves a fresh Uri and
+streams the bytes). Frontend: an Attachments section on the WO detail with a
+same-origin download proxy route handler (browser → Next, cookie-auth →
+FastAPI, JWT → SC). Re-runnable probe: `scripts/probe_sc_attachments.py`.
 
 ### Vendor / Provider Listing
 TBD — likely under `/v3/providers` or similar. Need to confirm whether SC
@@ -513,10 +531,22 @@ What we know we'll send for the minimum-viable Brenk submit:
 > (`SubmitInvoiceButton`) on the WO detail and the Invoices "Marked up"
 > rows. Decisions taken: invoice number `BRENK{wo_number}` (+`R2`/`R3`
 > on re-invoice; dashes dropped per CubeSmart's `^\w*$` rule — pending
-> Daryl's confirmation of preferred scheme), always Line Item form (one
-> synthetic labor/material line at the marked-up amount), zero tax,
+> Daryl's confirmation of preferred scheme), zero tax,
 > dialog-always-on. The webhook sync then confirms the created invoice
 > and drives status from there.
+>
+> **UPDATED 2026-06-20 — flat-rate (Standard form).** Per Daryl, invoices
+> bill as a flat rate: `build_payload` now sends the **Standard** form
+> (totals only via `InvoiceAmountsDetails`, no itemized
+> `Labors[]`/`Materials[]`), so no synthetic "1 tech × 1 hr × $X/hr" line
+> reaches the client. Brenk doesn't track tech hours/rates, so this is
+> the natural shape. Trade-off (Option 1): CubeSmart forces Line Item for
+> a few repair categories (`LaborCategoryIds`/`MaterialsCategoryIds`); a
+> Standard body for one of those WOs is rejected by SC. Accepted for now —
+> Daryl doesn't invoice those categories. If a real submit is rejected on
+> that basis, revisit per-category form selection (Option 2): we store
+> `work_orders.sc_category_id`, so the builder can pick Line Item only for
+> gated categories.
 
 1. **InvoiceNumber format** — Daryl likely has an existing scheme he
    uses in SC. Likely candidates:
