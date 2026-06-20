@@ -25,9 +25,26 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+
+def _migration_url(url: str) -> str:
+    """Route migrations through Supabase's transaction-mode pooler (:6543).
+
+    The session-mode pooler (:5432) caps clients at 15, and the running app
+    (web machines + worker) holds them all — so a deploy's `alembic upgrade
+    head` can't get a connection (`EMAXCONNSESSION`). The transaction-mode
+    pooler has far higher concurrency, and plain DDL over psycopg2 is
+    transaction-pooler safe. Only rewrites the Supabase pooler host; any
+    other URL (local Postgres, direct connection) is left untouched.
+    """
+    marker = "pooler.supabase.com:5432"
+    if marker in url:
+        return url.replace(marker, "pooler.supabase.com:6543")
+    return url
+
+
 # Override the URL from alembic.ini with the one from settings
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", _migration_url(settings.DATABASE_URL))
 
 target_metadata = Base.metadata
 

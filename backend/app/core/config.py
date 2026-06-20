@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     # default `onboarding@resend.dev` only delivers to the account owner
     # until brenkfacilityservices.com is verified.
     # -------------------------------------------------------------------------
+    # SQLAlchemy async-engine pool sizing. Kept small on purpose: Supabase's
+    # session-mode pooler caps total clients at 15, shared across both web
+    # machines AND the worker. Defaults here (3 base + 2 overflow = 5 max per
+    # process) leave headroom under that cap (2 web + worker ≈ 9 idle, 15 peak)
+    # so a deploy's migration and connection spikes don't hit EMAXCONNSESSION.
+    DB_POOL_SIZE: int = 3
+    DB_MAX_OVERFLOW: int = 2
+
     RESEND_API_KEY: str = ""
     QUOTE_FROM_EMAIL: str = "Brenk Facility Services <quotes@brenkfacilityservices.com>"
     QUOTE_TO_EMAIL: str = "daryl@brenkfacilityservices.com"

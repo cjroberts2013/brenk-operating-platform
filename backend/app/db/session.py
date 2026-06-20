@@ -18,10 +18,14 @@ sync_engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
-# Async engine and session — used by FastAPI request handlers and workers
+# Async engine and session — used by FastAPI request handlers and workers.
+# Pool kept small (see DB_POOL_SIZE) so web machines + worker stay under
+# Supabase's session-mode pooler cap of 15 clients.
 async_engine = create_async_engine(
     settings.DATABASE_URL_ASYNC,
     pool_pre_ping=True,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
     echo=settings.DEBUG,
 )
 AsyncSessionLocal = async_sessionmaker(
