@@ -8,9 +8,15 @@ results"): POST /v3/invoices with marked-up amounts. Hard rules baked in:
 - CubeSmart requires resolution text (`InvoiceText`) and an alphanumeric
   invoice number matching ^\\w*$ (no dashes/spaces), unique, no reuse.
 - `InvoiceTotal` must be <= the WO's NTE.
-- We always submit the Line Item form (one labor line / one material
-  line at the marked-up amounts). CubeSmart's repair categories REQUIRE
-  line items; for others they're optional, so including them is safe.
+- We submit the **Standard** (flat-rate) form: totals only, no itemized
+  `Labors[]`/`Materials[]` arrays. Brenk bills a flat amount and doesn't
+  track tech hours/rates, so a Standard invoice renders cleanly to the
+  client (no synthetic "1 hr @ $X" hourly rate). Note: CubeSmart forces a
+  Line Item invoice for a handful of repair categories
+  (`LaborCategoryIds`/`MaterialsCategoryIds`); a Standard body for one of
+  those WOs is rejected by SC. We accept that trade-off for now — Daryl
+  doesn't invoice those categories. Revisit (per-category form selection,
+  Option 2) if a real submit gets rejected for it.
 - 8.25% Texas sales tax is added on the marked-up subtotal — matches
   how Daryl invoices manually (verified against real invoices 101581
   and 101584, both exactly 8.25%). InvoiceTotal includes the tax and
@@ -177,9 +183,14 @@ def compute_preview(
 
 
 def build_payload(preview: InvoicePreview, wo: WorkOrder) -> dict[str, Any]:
-    """The exact POST /v3/invoices body. Marked-up amounts only."""
+    """The exact POST /v3/invoices body. Marked-up amounts only.
+
+    Standard (flat-rate) form: totals only via `InvoiceAmountsDetails`, no
+    itemized `Labors[]`/`Materials[]`. No tech hours/hourly rate is ever
+    sent — Brenk bills a flat amount.
+    """
     now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    payload: dict[str, Any] = {
+    return {
         "InvoiceNumber": preview.invoice_number,
         "WoIdentifier": wo.sc_number.strip(),
         "InvoiceText": preview.resolution_text,
@@ -195,32 +206,6 @@ def build_payload(preview: InvoicePreview, wo: WorkOrder) -> dict[str, Any]:
             "OtherAmount": 0,
         },
     }
-    # Line-item form: category-gated WOs require it; harmless otherwise.
-    # One synthetic line per component at the marked-up amount (Brenk pays
-    # subs flat — we don't track real tech hours/rates).
-    if preview.labor_amount > 0:
-        payload["Labors"] = [
-            {
-                "SkillLevel": "2",  # Technician
-                "LaborType": "1",  # Regular
-                "NumOfTech": "1",
-                "HourlyRate": float(preview.labor_amount),
-                "Hours": 1,
-                "Amount": float(preview.labor_amount),
-            }
-        ]
-    if preview.material_amount > 0:
-        payload["Materials"] = [
-            {
-                "Description": "Parts & materials",
-                "PartNum": "",
-                "UnitType": "1",  # Each
-                "UnitPrice": float(preview.material_amount),
-                "Quantity": 1,
-                "Amount": float(preview.material_amount),
-            }
-        ]
-    return payload
 
 
 async def count_prior_invoices(db: AsyncSession, wo: WorkOrder, sc_env: str) -> int:

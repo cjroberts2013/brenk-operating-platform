@@ -86,9 +86,7 @@ def test_missing_markup_and_costs_block() -> None:
 
 
 def test_markup_set_but_no_costs_blocks() -> None:
-    p = compute_preview(
-        _wo(brenk_labor_cost=None, brenk_material_cost=None), 0
-    )
+    p = compute_preview(_wo(brenk_labor_cost=None, brenk_material_cost=None), 0)
     assert any("No vendor costs" in s for s in p.problems)
 
 
@@ -112,8 +110,9 @@ def test_total_override_bills_as_single_labor_line() -> None:
 
     payload = build_payload(p, wo)
     assert payload["InvoiceTotal"] == 216.50
-    assert payload["Labors"][0]["Amount"] == 200.00
-    assert "Materials" not in payload  # no material line for a total-only invoice
+    # Standard (flat-rate) form: the whole total rides as LaborAmount.
+    assert payload["InvoiceAmountsDetails"]["LaborAmount"] == 200.00
+    assert payload["InvoiceAmountsDetails"]["MaterialAmount"] == 0.0
 
 
 def test_total_override_respects_nte_including_tax() -> None:
@@ -151,9 +150,7 @@ def test_tax_pushing_total_over_nte_blocks() -> None:
 
 
 def test_active_sc_invoice_blocks_but_void_does_not() -> None:
-    blocked = compute_preview(
-        _wo(sc_invoice_status="Open", sc_invoice_number="BRENK1"), 0
-    )
+    blocked = compute_preview(_wo(sc_invoice_status="Open", sc_invoice_number="BRENK1"), 0)
     assert any("already exists" in s for s in blocked.problems)
     ok = compute_preview(_wo(sc_invoice_status="Void", sc_invoice_number="BRENK1"), 1)
     assert ok.eligible, ok.problems
@@ -181,9 +178,9 @@ def test_payload_carries_marked_up_amounts_only() -> None:
     assert payload["InvoiceTax"] == 20.42  # 8.25% TX sales tax
     assert payload["InvoiceAmountsDetails"]["LaborAmount"] == 165.0
     assert payload["InvoiceAmountsDetails"]["MaterialAmount"] == 82.5
-    # Line-item form: one synthetic line per component, amounts match.
-    assert payload["Labors"][0]["Amount"] == 165.0
-    assert payload["Materials"][0]["Amount"] == 82.5
+    # Standard (flat-rate) form: totals only, no itemized line arrays.
+    assert "Labors" not in payload
+    assert "Materials" not in payload
     # Confidentiality: raw vendor costs (100/50) and the markup % (65)
     # never appear as values, and no brenk_* field leaks.
     amounts = payload["InvoiceAmountsDetails"]
@@ -194,10 +191,11 @@ def test_payload_carries_marked_up_amounts_only() -> None:
     assert "markup" not in str(payload).lower()
 
 
-def test_payload_omits_empty_component_arrays() -> None:
+def test_payload_is_standard_form_never_itemized() -> None:
+    # No line-item arrays are ever sent — Standard (flat-rate) form only.
     wo = _wo(brenk_material_cost=None)
     p = compute_preview(wo, 0)
     payload = build_payload(p, wo)
-    assert "Labors" in payload
+    assert "Labors" not in payload
     assert "Materials" not in payload
     assert payload["InvoiceAmountsDetails"]["MaterialAmount"] == 0.0

@@ -6,6 +6,8 @@
  * and will tighten as we learn which extended_status values matter.
  *
  *   IN PROGRESS  → yellow (dispatch confirmed, work happening)
+ *   COMPLETED · PENDING CONFIRMATION → orange (work done, waiting on the
+ *                store to confirm — SC's "work complete" colour)
  *   COMPLETED    → green  (closed by store; ready to invoice)
  *   OPEN         → slate  (accepted, not yet dispatched)
  *   CANCELLED    → gray   (dead, struck-through)
@@ -37,11 +39,19 @@ const TONE_CLASSES: Record<Tone, string> = {
   gray: 'bg-gray-100 text-gray-700 ring-gray-500/20 dark:bg-gray-500/10 dark:text-gray-300 dark:ring-gray-400/30',
 }
 
-function toneFor(status: string): Tone {
+function toneFor(status: string, extended?: string | null): Tone {
   const s = status.toUpperCase()
+  const ext = (extended ?? '').toUpperCase()
   if (s.includes('CANCEL')) return 'gray'
   if (s.includes('PROGRESS')) return 'yellow'
-  if (s.includes('COMPLETED') || s.includes('CONFIRMED')) return 'green'
+  if (s.includes('COMPLETED')) {
+    // SC's colour language: work is complete but the store hasn't
+    // confirmed it yet → orange ("work complete"). Once the store
+    // confirms (closes) it → green.
+    if (ext.includes('PENDING CONFIRMATION')) return 'orange'
+    return 'green'
+  }
+  if (s.includes('CONFIRMED')) return 'green'
   if (s === 'OPEN' || s.includes('NEW') || s.includes('PENDING')) return 'pink'
   if (s.includes('EXPIRED') || s.includes('STALE')) return 'red'
   return 'slate'
@@ -54,7 +64,7 @@ export function StatusBadge({
   status: string
   extended?: string | null
 }): ReactNode {
-  const tone = toneFor(status)
+  const tone = toneFor(status, extended)
   const label = extended ? `${status} · ${extended}` : status
   return (
     <span
