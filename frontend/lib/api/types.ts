@@ -240,6 +240,31 @@ export type WorkOrderListResponse = {
   page_size: number
 }
 
+/** A ready-to-send vendor notification message for a work order. `body`
+ *  pastes into SMS or email; `subject` is the suggested email subject. */
+export type VendorMessage = {
+  subject: string
+  body: string
+  to_phone: string | null
+  to_email: string | null
+  contact_preference: string | null
+  photo_count: number
+}
+
+/** A file attached to a work order (from SC's OData attachments list).
+ *  The raw SC presigned `Uri` is never exposed — downloads go through our
+ *  proxy. `content_type` is guessed from the file name. */
+export type WorkOrderAttachment = {
+  id: number
+  name: string | null
+  description: string | null
+  note_id: number | null
+  timestamp: string | null // ISO 8601
+  is_invoice_digital_copy: boolean
+  upload_by: string | null
+  content_type: string | null
+}
+
 export type WorkOrderNoteRef = {
   id: number
   sc_note_id: number | null
@@ -576,4 +601,93 @@ export type Storefront = {
 export type StorefrontUpdate = Partial<
   Omit<Storefront, 'id' | 'services' | 'created_at' | 'updated_at'>
 >
+
+// ---------------------------------------------------------------------------
+// Locations
+// ---------------------------------------------------------------------------
+
+/** 3-tier operational health flag. null = unrated. */
+export type LocationRating = 'good' | 'watch' | 'problem'
+
+/** A gate/access code with its lifecycle state. Codes are invalidated, not
+ *  deleted, so history is preserved. */
+export type GateCode = {
+  id: number
+  label: string | null
+  code: string
+  is_active: boolean
+  invalidated_at: string | null // ISO 8601
+  created_at: string
+  updated_at: string
+}
+
+export type LocationSummary = {
+  id: number
+  sc_location_id: number
+  store_id: string | null
+  name: string | null
+  region: string | null
+  district: string | null
+  rating: string | null
+  district_manager_name: string | null
+  total_work_orders: number
+  active_work_orders: number
+  last_work_order_date: string | null // ISO 8601
+}
+
+export type LocationDetail = {
+  id: number
+  sc_location_id: number
+  store_id: string | null
+  name: string | null
+  region: string | null
+  district: string | null
+  latitude: string | null
+  longitude: string | null
+  district_manager_name: string | null
+  district_manager_phone: string | null
+  district_manager_email: string | null
+  rating: string | null
+  description: string | null
+  /** One-line address derived from the SC raw_data blob. */
+  address: string | null
+  gate_codes_active: GateCode[]
+  gate_codes_history: GateCode[]
+  total_work_orders: number
+  active_work_orders: number
+  last_work_order_date: string | null
+  work_orders: WorkOrderSummary[]
+  created_at: string
+  updated_at: string
+}
+
+export type LocationListParams = {
+  q?: string
+  rating?: string
+  page?: number
+  page_size?: number
+}
+
+export type LocationListResponse = {
+  items: LocationSummary[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/** PATCH body for /api/v1/locations/{id}. Brenk enrichment fields only;
+ *  every field optional. */
+export type LocationUpdate = {
+  district_manager_name?: string | null
+  district_manager_phone?: string | null
+  district_manager_email?: string | null
+  rating?: LocationRating | null
+  description?: string | null
+}
+
+/** POST body for adding a gate code. */
+export type GateCodeCreate = {
+  code: string
+  label?: string | null
+}
 

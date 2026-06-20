@@ -47,6 +47,21 @@ def test_extract_location_uses_nested_id(sample_work_order_list: list[dict]) -> 
     assert fields["is_international"] is False
 
 
+def test_extract_location_fields_are_sc_only(sample_work_order_list: list[dict]) -> None:
+    """The transformer must never emit Brenk enrichment keys — upsert_location
+    writes from this dict, and the sync must not clobber operator-entered
+    district-manager / rating / description data. Guards the allowlist."""
+    fields = extract_location_fields(sample_work_order_list[0]["Location"])
+    brenk_only = {
+        "district_manager_name",
+        "district_manager_phone",
+        "district_manager_email",
+        "rating",
+        "description",
+    }
+    assert brenk_only.isdisjoint(fields.keys())
+
+
 def test_extract_trade_prefers_id(sample_work_order_list: list[dict]) -> None:
     fields = extract_trade_fields(sample_work_order_list[0])
     assert fields is not None

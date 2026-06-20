@@ -82,10 +82,35 @@ async def upsert_trade(session: AsyncSession, payload: dict[str, Any]) -> Trade 
     return existing
 
 
+# The ONLY Location columns the sync is allowed to write. Brenk-internal
+# enrichment columns (district_manager_*, rating, description) and the
+# gate_codes child rows are deliberately absent — the sync must never
+# clobber operator-entered data. Mirrors the vendor sync, which only
+# writes name/email/raw_data and leaves Brenk vendor fields untouched.
+# If you add an SC-sourced field to extract_location_fields(), add it here
+# too; never add a Brenk enrichment key.
+_SC_SYNCED_LOCATION_FIELDS = (
+    "sc_location_id",
+    "store_id",
+    "name",
+    "latitude",
+    "longitude",
+    "region",
+    "district",
+    "timezone_offset",
+    "is_international",
+    "raw_data",
+)
+
+
 async def upsert_location(
     session: AsyncSession, location: dict[str, Any], client_id: int
 ) -> Location:
-    """Get-or-create a Location row, linking it to the given client."""
+    """Get-or-create a Location row, linking it to the given client.
+
+    Only SC-sourced columns are written (see _SC_SYNCED_LOCATION_FIELDS).
+    Brenk enrichment fields and gate codes are never touched by sync.
+    """
     fields = extract_location_fields(location)
     stmt = select(Location).where(Location.sc_location_id == fields["sc_location_id"])
     existing = (await session.execute(stmt)).scalar_one_or_none()
@@ -97,8 +122,8 @@ async def upsert_location(
         return loc
 
     existing.client_id = client_id
-    for key, value in fields.items():
-        setattr(existing, key, value)
+    for key in _SC_SYNCED_LOCATION_FIELDS:
+        setattr(existing, key, fields[key])
     await session.flush()
     return existing
 

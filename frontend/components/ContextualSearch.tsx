@@ -56,6 +56,13 @@ function detectScope(pathname: string): Scope {
       placeholder: 'Search vendors by name, phone, email, area, trade…',
     }
   }
+  if (pathname === '/locations') {
+    return {
+      kind: 'searchable',
+      basePath: '/locations',
+      placeholder: 'Search locations by store #, name, district, manager…',
+    }
+  }
   return { kind: 'hidden' }
 }
 

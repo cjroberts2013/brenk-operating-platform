@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -95,11 +96,72 @@ class Location(Base, TimestampMixin):
     is_international: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     raw_data: Mapped[dict | None] = mapped_column(JSONB)
 
+    # Brenk-internal enrichment (added 2026-06-20). None of these exist in
+    # ServiceChannel — they're operational knowledge Daryl keeps about a
+    # site. The work-order sync MUST NOT write these: upsert_location()
+    # writes only an explicit SC-field allowlist, mirroring the vendor sync
+    # that never clobbers Brenk-internal vendor fields.
+    district_manager_name: Mapped[str | None] = mapped_column(String(255))
+    district_manager_phone: Mapped[str | None] = mapped_column(String(50))
+    district_manager_email: Mapped[str | None] = mapped_column(String(255))
+    # 3-tier operational health flag: "good" | "watch" | "problem".
+    # Plain String, not a DB enum — matches work_orders.primary_status and
+    # vendor.contact_preference; the closed set is enforced in the Pydantic
+    # layer (Literal). NULL = unrated (a site Daryl hasn't reviewed yet);
+    # deliberately not defaulted to "good" so unreviewed sites don't read
+    # as healthy.
+    rating: Mapped[str | None] = mapped_column(String(20))
+    # Free-text running notes / context Daryl accumulates on the location.
+    description: Mapped[str | None] = mapped_column(Text)
+
     client: Mapped["Client"] = relationship(back_populates="locations")
     work_orders: Mapped[list["WorkOrder"]] = relationship(back_populates="location")
+    gate_codes: Mapped[list["GateCode"]] = relationship(
+        back_populates="location",
+        cascade="all, delete-orphan",
+        order_by="GateCode.created_at.desc()",
+    )
 
     def __repr__(self) -> str:
         return f"<Location {self.store_id} {self.name}>"
+
+
+class GateCode(Base, TimestampMixin):
+    """A gate / access code for a location.
+
+    Codes are never edited in place. When a code changes, the old row is
+    *invalidated* (is_active=False, invalidated_at set) and a new active row
+    is added — so the history of what the code used to be is preserved. A
+    location may have several active codes at once (e.g. "front gate" and
+    "loading dock"), distinguished by `label`.
+    """
+
+    __tablename__ = "gate_codes"
+    __table_args__ = (
+        Index("ix_gate_codes_location_id", "location_id"),
+        # Hot path: the currently-active codes for a location. Partial index
+        # keeps it small.
+        Index(
+            "ix_gate_codes_location_active",
+            "location_id",
+            postgresql_where=text("is_active"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    location_id: Mapped[int] = mapped_column(
+        ForeignKey("locations.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str | None] = mapped_column(String(100))
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    location: Mapped["Location"] = relationship(back_populates="gate_codes")
+
+    def __repr__(self) -> str:
+        state = "active" if self.is_active else "invalidated"
+        return f"<GateCode {self.code} ({state}) loc={self.location_id}>"
 
 
 class VendorTrade(Base):

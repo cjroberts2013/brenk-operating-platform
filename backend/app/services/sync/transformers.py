@@ -51,6 +51,11 @@ def extract_location_fields(location: dict[str, Any]) -> dict[str, Any]:
     Note: the top-level `LocationId` field on a work order is unreliable
     (often 0 — see docs/architecture/servicechannel-api.md). Always use the
     nested `Location.Id`, which is what this function reads.
+
+    IMPORTANT: this dict must only ever contain SC-sourced columns. Never
+    add Brenk enrichment keys (district_manager_*, rating, description) —
+    upsert_location() writes an explicit allowlist derived from these keys,
+    and the sync must never overwrite operator-entered location data.
     """
     return {
         "sc_location_id": location["Id"],

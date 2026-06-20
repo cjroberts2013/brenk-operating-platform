@@ -36,6 +36,7 @@ import {
   GlobeAltIcon,
   HomeIcon,
   ClipboardDocumentListIcon,
+  MapPinIcon,
   QuestionMarkCircleIcon,
   UsersIcon,
   XMarkIcon,
@@ -62,6 +63,7 @@ const navigation: NavItem[] = [
   { name: 'Work Orders', href: '/work-orders', icon: ClipboardDocumentListIcon },
   { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
   { name: 'Vendors', href: '/vendors', icon: UsersIcon },
+  { name: 'Locations', href: '/locations', icon: MapPinIcon },
   { name: 'Storefront', href: '/storefront', icon: GlobeAltIcon, devOnly: true },
   { name: 'Reports', href: '/reports', icon: ChartPieIcon, devOnly: true },
 ]
