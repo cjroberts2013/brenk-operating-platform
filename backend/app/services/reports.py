@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from app.models.work_order import WorkOrder
 from app.schemas.reports import (
+    MarkupByCategory,
     MarkupByTrade,
     ReportsSummary,
     ReportsTotals,
@@ -56,6 +57,7 @@ def build_reports_summary(work_orders: Iterable[WorkOrder]) -> ReportsSummary:
     """Aggregate markup/spend analytics across the given work orders."""
     total = _Bucket()
     by_trade: dict[int, _Bucket] = defaultdict(_Bucket)
+    by_category: dict[str, _Bucket] = defaultdict(_Bucket)
     by_vendor: dict[int, _Bucket] = defaultdict(_Bucket)
     trade_names: dict[int, str] = {}
     trade_defaults: dict[int, float | None] = {}
@@ -88,6 +90,13 @@ def build_reports_summary(work_orders: Iterable[WorkOrder]) -> ReportsSummary:
                 if wo.trade.default_markup_percent is not None
                 else None
             )
+
+        if wo.brenk_category:
+            c = by_category[wo.brenk_category]
+            c.jobs += 1
+            c.vendor_cost += subtotal
+            c.margin += margin
+            c.markup_sum += markup_pct
 
         if wo.assigned_vendor is not None:
             v = by_vendor[wo.assigned_vendor.id]
@@ -130,6 +139,19 @@ def build_reports_summary(work_orders: Iterable[WorkOrder]) -> ReportsSummary:
         )
     markup_by_trade.sort(key=lambda m: m.trade_name.lower())
 
+    # ---- markup by category (profit per job type) ----
+    markup_by_category = [
+        MarkupByCategory(
+            category=category,
+            jobs_with_markup=b.jobs,
+            avg_actual_markup_percent=round(b.markup_sum / b.jobs, 1) if b.jobs else None,
+            total_vendor_cost=_money(b.vendor_cost),
+            total_margin=_money(b.margin),
+        )
+        for category, b in by_category.items()
+    ]
+    markup_by_category.sort(key=lambda m: m.category.lower())
+
     # ---- vendor spend (most spend first) ----
     vendor_spend = [
         VendorSpend(
@@ -146,5 +168,6 @@ def build_reports_summary(work_orders: Iterable[WorkOrder]) -> ReportsSummary:
     return ReportsSummary(
         totals=totals,
         markup_by_trade=markup_by_trade,
+        markup_by_category=markup_by_category,
         vendor_spend=vendor_spend,
     )

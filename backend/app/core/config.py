@@ -78,9 +78,15 @@ class Settings(BaseSettings):
         )
 
     # -------------------------------------------------------------------------
-    # Anthropic (Phase 2+)
+    # AI provider keys (Phase 2+). Server-side secrets — never exposed to the
+    # frontend. Empty by default so the app boots without them.
     # -------------------------------------------------------------------------
     ANTHROPIC_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    # Gemini model used for WO categorization. Flash Lite is fast + cheap.
+    # Override via env/secret to track the exact current model id (e.g.
+    # "gemini-flash-lite-latest" / "gemini-3.1-flash-lite").
+    GEMINI_MODEL: str = "gemini-flash-lite-latest"
 
     # -------------------------------------------------------------------------
     # Email (Resend) — powers the storefront "Request a Quote" form.

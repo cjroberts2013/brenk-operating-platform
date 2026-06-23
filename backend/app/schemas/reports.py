@@ -28,6 +28,39 @@ class MarkupByTrade(BaseModel):
     total_margin: str  # sum of (total bill - vendor cost)
 
 
+class MarkupByCategory(BaseModel):
+    """Profit + markup for one Brenk job category (marked-up jobs only)."""
+
+    category: str
+    jobs_with_markup: int
+    avg_actual_markup_percent: float | None
+    total_vendor_cost: str
+    total_margin: str
+
+
+class CategoryOverview(BaseModel):
+    """Volume + billed revenue for one job category — populated from
+    categorization + SC invoices, independent of the markup helper.
+
+    `billed`/`paid` are sums of linked SC invoice totals (what the client
+    was billed / has paid). This answers "how much is this category making"
+    in revenue terms even before vendor costs are entered."""
+
+    category: str
+    jobs: int  # total WOs in this category
+    invoiced_jobs: int  # WOs that reached INVOICED status
+    billed: str  # sum of non-void invoice totals
+    paid: str  # sum of paid invoice totals
+
+
+class ReportsCoverage(BaseModel):
+    """How much of the data needed for profit analytics actually exists yet.
+    Drives the "price more jobs to unlock profit" nudge."""
+
+    invoiced_jobs: int  # WOs that have been invoiced
+    priced_jobs: int  # WOs with a markup % or a direct total entered
+
+
 class VendorSpend(BaseModel):
     """Spend + margin routed through one vendor (marked-up jobs only)."""
 
@@ -60,4 +93,10 @@ class ReportsSummary(BaseModel):
 
     totals: ReportsTotals
     markup_by_trade: list[MarkupByTrade]
+    markup_by_category: list[MarkupByCategory]
     vendor_spend: list[VendorSpend]
+    # Revenue/volume by category + data-coverage. Populated by the endpoint
+    # (from invoices + WO counts), so they default empty for the pure
+    # markup-aggregation path / tests.
+    category_overview: list[CategoryOverview] = []
+    coverage: ReportsCoverage | None = None

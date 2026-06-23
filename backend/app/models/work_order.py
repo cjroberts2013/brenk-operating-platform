@@ -354,6 +354,19 @@ class WorkOrder(Base, TimestampMixin):
     # mode. Null = not yet notified. SC has no equivalent.
     brenk_vendor_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Brenk job category (AI-inferred, then confirmed/overridden by the
+    # operator). Distinct from SC's `trade` and `category` — a curated job
+    # *type* (app/services/categories.py) used for profit metrics and markup
+    # suggestions. `brenk_category` is the effective value; `*_source` is
+    # 'ai' (unreviewed), 'confirmed' (operator agreed) or 'manual' (operator
+    # changed it); `*_confidence` is the model's 0..1 score; `*_ai` preserves
+    # the original AI guess even after a manual override (to measure accuracy).
+    brenk_category: Mapped[str | None] = mapped_column(String(50), index=True)
+    brenk_category_source: Mapped[str | None] = mapped_column(String(20))
+    brenk_category_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    brenk_category_ai: Mapped[str | None] = mapped_column(String(50))
+    brenk_category_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # ServiceChannel invoice state, synced from SC invoice webhooks
     # (see docs/architecture/sc-invoice-webhook-sync.md). These let the
     # invoice queue derive Sent -> Approved -> Paid from SC instead of

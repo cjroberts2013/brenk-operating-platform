@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/20/solid'
 
 import { AttachmentsSection } from '@/components/work-orders/AttachmentsSection'
+import { CategoryControl } from '@/components/work-orders/CategoryControl'
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
@@ -23,6 +24,7 @@ import { listVendors } from '@/lib/api/vendors'
 import {
   getVendorMessage,
   getWorkOrder,
+  listCategories,
   listWorkOrderAttachments,
   listWorkOrderNotes,
 } from '@/lib/api/work-orders'
@@ -65,11 +67,13 @@ export default async function WorkOrderDetailPage({
   let wo
   let notes
   let activeVendors
+  let categoryList
   try {
-    ;[wo, notes, activeVendors] = await Promise.all([
+    ;[wo, notes, activeVendors, categoryList] = await Promise.all([
       getWorkOrder(id),
       listWorkOrderNotes(id),
       listVendors({ is_active: true, page_size: 200 }),
+      listCategories(),
     ])
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound()
@@ -265,6 +269,13 @@ export default async function WorkOrderDetailPage({
               attachments={attachments}
             />
           ) : null}
+
+          <CategoryControl
+            workOrderId={wo.id}
+            category={wo.brenk_category}
+            source={wo.brenk_category_source}
+            categories={categoryList.categories}
+          />
 
           <MarkupHelper wo={wo} defaultOpen={markupOpen} />
 

@@ -8,6 +8,7 @@ deployment health probes.
 from fastapi import APIRouter, Depends
 
 from app.api.v1.endpoints import (
+    categories,
     dashboard,
     invoices,
     locations,
@@ -26,6 +27,7 @@ api_router.include_router(work_orders.router, prefix="/work-orders", tags=["work
 api_router.include_router(invoices.router, prefix="/invoices", tags=["invoices"])
 api_router.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
 api_router.include_router(locations.router, prefix="/locations", tags=["locations"])
+api_router.include_router(categories.router, prefix="/categories", tags=["categories"])
 api_router.include_router(trades.router, prefix="/trades", tags=["trades"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])

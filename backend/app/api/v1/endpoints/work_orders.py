@@ -41,6 +41,7 @@ from app.schemas.work_order import (
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
+from app.services.categories import is_valid_category
 from app.services.email import is_valid_email, send_email
 from app.services.invoice_submit import (
     InvoiceSubmitError,
@@ -125,6 +126,11 @@ class WorkOrderUpdate(BaseModel):
     # `brenk_vendor_notified_at = now()` (Daryl texted/called the
     # assigned sub-vendor), `"clear"` resets it to null.
     notified: Literal["now", "clear"] | None = Field(default=None)
+    # Job category. `brenk_category` = a manual override (must be in the
+    # curated taxonomy → source becomes 'manual'). `category_action:
+    # "confirm"` keeps the current value but marks it operator-confirmed.
+    brenk_category: str | None = Field(default=None)
+    category_action: Literal["confirm"] | None = Field(default=None)
 
 
 class WorkOrderSyncStatus(BaseModel):
@@ -483,10 +489,44 @@ async def get_work_order(
     return await _to_detail(db, wo)
 
 
+# Minimum past jobs in a category before its average markup is trustworthy
+# enough to suggest; below this we fall back to the trade default.
+_MIN_CATEGORY_MARKUP_SAMPLES = 3
+
+
+async def _markup_suggestion(db: AsyncSession, wo: WorkOrder) -> tuple[Decimal | None, str | None]:
+    """Suggested markup % + a human label. Prefers the average markup of past
+    jobs in this WO's category (>= _MIN samples), else the trade default."""
+    if wo.brenk_category:
+        row = (
+            await db.execute(
+                select(
+                    func.avg(WorkOrder.brenk_markup_percent),
+                    func.count(WorkOrder.brenk_markup_percent),
+                ).where(
+                    WorkOrder.brenk_category == wo.brenk_category,
+                    WorkOrder.brenk_markup_percent.is_not(None),
+                )
+            )
+        ).one()
+        avg_markup, sample_count = row
+        if avg_markup is not None and sample_count >= _MIN_CATEGORY_MARKUP_SAMPLES:
+            label = f"avg of {sample_count} {wo.brenk_category} job{'s' if sample_count != 1 else ''}"
+            return Decimal(avg_markup).quantize(Decimal("0.1")), label
+
+    if wo.trade is not None and wo.trade.default_markup_percent is not None:
+        return wo.trade.default_markup_percent, f"{wo.trade.name} default"
+
+    return None, None
+
+
 async def _to_detail(db: AsyncSession, wo: WorkOrder) -> WorkOrderDetail:
     """Validate the WO into a detail schema and attach its linked SC
-    invoice record(s) (latest first), synced from invoice webhooks."""
+    invoice record(s) (latest first) + the computed markup suggestion."""
     detail = WorkOrderDetail.model_validate(wo)
+    detail.suggested_markup_percent, detail.suggested_markup_label = await _markup_suggestion(
+        db, wo
+    )
     if wo.sc_work_order_id is not None:
         invoices = (
             (
@@ -657,6 +697,22 @@ async def update_work_order(
             wo.brenk_vendor_notified_at = datetime.now(UTC)
         elif action == "clear":
             wo.brenk_vendor_notified_at = None
+
+    # Category: a manual override (validated against the taxonomy) takes
+    # precedence; otherwise a "confirm" marks the current AI value accepted.
+    if "brenk_category" in update_data:
+        new_category = update_data["brenk_category"]
+        if new_category is not None and not is_valid_category(new_category):
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail=f"unknown category: {new_category}",
+            )
+        wo.brenk_category = new_category
+        wo.brenk_category_source = "manual" if new_category is not None else None
+        wo.brenk_category_at = datetime.now(UTC)
+    elif update_data.get("category_action") == "confirm":
+        wo.brenk_category_source = "confirmed"
+        wo.brenk_category_at = datetime.now(UTC)
 
     await db.commit()
     # populate_existing rebuilds the in-memory WO from the new SELECT

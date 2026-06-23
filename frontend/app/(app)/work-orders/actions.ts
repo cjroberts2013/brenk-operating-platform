@@ -54,6 +54,41 @@ export async function assignVendorAction(
 }
 
 
+export type CategoryState = {
+  error: string | null
+  attempt: number
+}
+
+/** Confirm the AI category (no value) or override it (a category value). */
+export async function setCategoryAction(
+  prev: CategoryState,
+  formData: FormData,
+): Promise<CategoryState> {
+  const attempt = prev.attempt + 1
+  const workOrderId = Number(formData.get('work_order_id'))
+  if (!Number.isFinite(workOrderId) || workOrderId < 1) {
+    return { error: 'invalid work order id', attempt }
+  }
+
+  const raw = formData.get('brenk_category')
+  const body =
+    raw === null
+      ? { category_action: 'confirm' as const }
+      : { brenk_category: String(raw) }
+
+  try {
+    await patchWorkOrder(workOrderId, body)
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail, attempt }
+    throw err
+  }
+
+  revalidatePath(`/work-orders/${workOrderId}`)
+  revalidatePath('/reports')
+  return { error: null, attempt }
+}
+
+
 export async function sendVendorEmailAction(
   workOrderId: number,
 ): Promise<{ result?: VendorEmailResult; error?: string }> {

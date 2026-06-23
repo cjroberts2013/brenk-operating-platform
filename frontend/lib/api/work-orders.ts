@@ -46,6 +46,10 @@ export function getVendorMessage(id: number): Promise<VendorMessage> {
   return apiFetch<VendorMessage>(`/api/v1/work-orders/${id}/vendor-message`)
 }
 
+export function listCategories(): Promise<{ categories: string[] }> {
+  return apiFetch<{ categories: string[] }>('/api/v1/categories/')
+}
+
 export type VendorEmailResult = {
   sent: boolean
   to_email: string

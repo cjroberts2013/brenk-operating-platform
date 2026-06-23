@@ -47,6 +47,31 @@ def test_wo_without_markup_is_ignored() -> None:
     assert summary.totals.jobs_with_markup == 0
 
 
+def _wo_cat(category, *, labor, markup) -> WorkOrder:
+    wo = _wo(labor=labor, markup=markup)
+    wo.brenk_category = category
+    return wo
+
+
+def test_by_category_groups_and_averages() -> None:
+    summary = build_reports_summary(
+        [
+            _wo_cat("Plumbing", labor=100, markup=80),
+            _wo_cat("Plumbing", labor=100, markup=60),
+            _wo_cat("Electrical", labor=200, markup=70),
+            _wo(labor=50, markup=90),  # no category → excluded from by_category
+        ]
+    )
+    cats = {c.category: c for c in summary.markup_by_category}
+    assert set(cats) == {"Plumbing", "Electrical"}
+    assert cats["Plumbing"].jobs_with_markup == 2
+    assert cats["Plumbing"].avg_actual_markup_percent == 70.0  # (80 + 60) / 2
+    assert cats["Plumbing"].total_margin == "140.00"  # 100*.8 + 100*.6
+    assert cats["Electrical"].jobs_with_markup == 1
+    # Sorted alphabetically by category.
+    assert [c.category for c in summary.markup_by_category] == ["Electrical", "Plumbing"]
+
+
 def test_wo_with_markup_but_zero_cost_is_ignored() -> None:
     summary = build_reports_summary([_wo(markup=80)])
     assert summary.totals.jobs_with_markup == 0

@@ -185,6 +185,17 @@ export type WorkOrderDetail = {
   brenk_paid_at: string | null
   brenk_vendor_notified_at: string | null
 
+  // Brenk job category (AI-inferred, operator-confirmed/overridden).
+  brenk_category: string | null
+  brenk_category_source: string | null // 'ai' | 'confirmed' | 'manual'
+  brenk_category_confidence: string | null
+  brenk_category_ai: string | null
+  brenk_category_at: string | null
+  /** Computed markup suggestion: category average (≥3 jobs) else trade
+   *  default. `*_label` explains the basis. */
+  suggested_markup_percent: string | null
+  suggested_markup_label: string | null
+
   // ServiceChannel invoice state, synced from SC invoice webhooks.
   sc_invoice_id: number | null
   sc_invoice_number: string | null
@@ -434,6 +445,11 @@ export type WorkOrderUpdate = {
   /** "now" stamps brenk_vendor_notified_at=now() (Daryl texted/called
    *  the assigned sub-vendor); "clear" resets to null. */
   notified?: 'now' | 'clear'
+  /** Manual category override (must be in the taxonomy → source 'manual').
+   *  Null clears. */
+  brenk_category?: string | null
+  /** "confirm" marks the current AI category operator-confirmed. */
+  category_action?: 'confirm'
 }
 
 /** Shape of the body for PATCH /api/v1/trades/{id}. */
@@ -534,6 +550,27 @@ export type MarkupByTrade = {
   total_margin: string
 }
 
+export type MarkupByCategory = {
+  category: string
+  jobs_with_markup: number
+  avg_actual_markup_percent: number | null
+  total_vendor_cost: string
+  total_margin: string
+}
+
+export type CategoryOverview = {
+  category: string
+  jobs: number
+  invoiced_jobs: number
+  billed: string
+  paid: string
+}
+
+export type ReportsCoverage = {
+  invoiced_jobs: number
+  priced_jobs: number
+}
+
 export type VendorSpend = {
   vendor_id: number
   vendor_name: string
@@ -545,7 +582,10 @@ export type VendorSpend = {
 export type ReportsSummary = {
   totals: ReportsTotals
   markup_by_trade: MarkupByTrade[]
+  markup_by_category: MarkupByCategory[]
   vendor_spend: VendorSpend[]
+  category_overview: CategoryOverview[]
+  coverage: ReportsCoverage | null
 }
 
 // =============================================================================

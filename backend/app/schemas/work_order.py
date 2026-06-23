@@ -238,6 +238,18 @@ class WorkOrderDetail(_OrmModel):
     brenk_paid_at: datetime | None
     brenk_vendor_notified_at: datetime | None
 
+    # Brenk job category (AI-inferred, operator-confirmed/overridden).
+    brenk_category: str | None
+    brenk_category_source: str | None  # 'ai' | 'confirmed' | 'manual'
+    brenk_category_confidence: Decimal | None
+    brenk_category_ai: str | None
+    brenk_category_at: datetime | None
+    # Computed markup suggestion (not stored): the average markup of past
+    # jobs in this category (≥3 samples) else the trade default. Attached by
+    # the detail endpoint; `*_label` explains the basis for the UI.
+    suggested_markup_percent: Decimal | None = None
+    suggested_markup_label: str | None = None
+
     # ServiceChannel invoice state, synced from SC invoice webhooks.
     sc_invoice_id: int | None
     sc_invoice_number: str | None

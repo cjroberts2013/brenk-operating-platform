@@ -9,6 +9,7 @@ import structlog
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.services.categorize import categorize_uncategorized
 from app.services.invoice_sync import process_event, process_pending_events
 from app.services.servicechannel.client import ServiceChannelClient
 from app.services.sync.notes import sync_notes_for_sc_work_order_id
@@ -94,6 +95,23 @@ async def process_webhook_event(event_id: int) -> dict:
     async with AsyncSessionLocal() as session:
         result = await process_event(session, event_id, sc_env=settings.SC_ENVIRONMENT)
     return {"event_id": event_id, "status": result}
+
+
+@procrastinate_app.periodic(cron="15 * * * *")
+@procrastinate_app.task(name="categorize_work_orders", queue="default")
+async def categorize_work_orders(timestamp: int) -> dict:
+    """Categorize any work orders missing a Brenk job category.
+
+    Runs hourly (offset from the top-of-hour WO sync so new WOs are already
+    in the DB). Idempotent and capped per run, so steady state (~8 new
+    WOs/day) is a handful of cheap Flash-Lite text calls; most runs do
+    nothing. No-ops without GEMINI_API_KEY.
+
+    `timestamp` is the Procrastinate scheduled tick (used for logging).
+    """
+    logger.info("categorize_work_orders tick", timestamp=timestamp)
+    async with AsyncSessionLocal() as session:
+        return await categorize_uncategorized(session)
 
 
 @procrastinate_app.task(name="sync_vendors", queue="default")

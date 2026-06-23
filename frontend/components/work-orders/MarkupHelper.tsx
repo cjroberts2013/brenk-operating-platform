@@ -65,7 +65,7 @@ export function MarkupHelper({
   const hasOverride =
     wo.brenk_total_override !== null && wo.brenk_total_override !== undefined
   const initialMarkup =
-    wo.brenk_markup_percent ?? wo.trade?.default_markup_percent ?? ''
+    wo.brenk_markup_percent ?? wo.suggested_markup_percent ?? ''
   // Daryl can drive pricing in whichever unit he thinks in: markup %,
   // the final total bill, or the profit. `priceInput` holds the raw text
   // of the active unit. If this WO was priced by a direct total, open in
@@ -80,8 +80,10 @@ export function MarkupHelper({
   const [error, setError] = useState<string | null>(null)
   const [savedTick, setSavedTick] = useState(0)
 
-  const tradeDefault = wo.trade?.default_markup_percent ?? null
-  const tradeName = wo.trade?.name ?? null
+  // Backend-computed suggestion: category average (≥3 jobs) else trade
+  // default, with a human label explaining which.
+  const suggested = wo.suggested_markup_percent ?? null
+  const suggestedLabel = wo.suggested_markup_label ?? null
   const isPriced = wo.brenk_markup_percent !== null || hasOverride
   const isPaid = Boolean(wo.brenk_paid_at)
   const nte = wo.nte ? Number(wo.nte) : null
@@ -144,11 +146,9 @@ export function MarkupHelper({
     ? `Total set ${formatRelative(wo.brenk_marked_up_at)} · editable below`
     : wo.brenk_markup_percent !== null
       ? `Markup set ${formatRelative(wo.brenk_marked_up_at)} · editable below`
-      : tradeDefault && tradeName
-        ? `Suggested ${Number(tradeDefault).toFixed(0)}% (${tradeName} default)`
-        : tradeName
-          ? `No default set for ${tradeName} yet — set one in Settings`
-          : 'No trade on this WO; pick a markup manually'
+      : suggested !== null && suggestedLabel
+        ? `Suggested ${Number(suggested).toFixed(0)}% (${suggestedLabel})`
+        : 'No suggestion yet — pick a markup manually'
 
   function save() {
     setError(null)

@@ -65,7 +65,7 @@ const navigation: NavItem[] = [
   { name: 'Vendors', href: '/vendors', icon: UsersIcon },
   { name: 'Locations', href: '/locations', icon: MapPinIcon },
   { name: 'Storefront', href: '/storefront', icon: GlobeAltIcon, devOnly: true },
-  { name: 'Reports', href: '/reports', icon: ChartPieIcon, devOnly: true },
+  { name: 'Reports', href: '/reports', icon: ChartPieIcon },
 ]
 
 // process.env.NODE_ENV is inlined by Next at build time. On Vercel
