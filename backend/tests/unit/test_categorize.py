@@ -21,6 +21,14 @@ def _gemini_ok(category: str, confidence: float = 0.9) -> dict:
 
 _GEMINI_URL = r".*generativelanguage\.googleapis\.com.*"
 
+# The taxonomy is now passed in (loaded from the DB in production); tests
+# supply a small fixed list.
+_DEFS = [
+    ("Electrical", "Wiring, outlets, lighting."),
+    ("Plumbing", "Leaks, drains, pipes, fixtures."),
+    ("Doors", "Doors and hardware."),
+]
+
 
 @respx.mock
 async def test_categorize_parses_result(monkeypatch) -> None:
@@ -28,7 +36,9 @@ async def test_categorize_parses_result(monkeypatch) -> None:
     route = respx.post(url__regex=_GEMINI_URL).mock(
         return_value=httpx.Response(200, json=_gemini_ok("Plumbing", 0.92))
     )
-    result = await cat.categorize("DOORS / OTHER ISSUES / Leaky faucet in the restroom")
+    result = await cat.categorize(
+        "DOORS / OTHER ISSUES / Leaky faucet in the restroom", job_type_defs=_DEFS
+    )
     assert result == ("Plumbing", 0.92)
     assert route.called
     # Only the problem line is sent, not the breadcrumb boilerplate.
@@ -44,7 +54,7 @@ async def test_categorize_rejects_out_of_taxonomy(monkeypatch) -> None:
     respx.post(url__regex=_GEMINI_URL).mock(
         return_value=httpx.Response(200, json=_gemini_ok("Underwater Basket Weaving"))
     )
-    assert await cat.categorize("a / b / something") is None
+    assert await cat.categorize("a / b / something", job_type_defs=_DEFS) is None
 
 
 @respx.mock
@@ -53,7 +63,7 @@ async def test_categorize_clamps_confidence(monkeypatch) -> None:
     respx.post(url__regex=_GEMINI_URL).mock(
         return_value=httpx.Response(200, json=_gemini_ok("Electrical", 1.7))
     )
-    result = await cat.categorize("x / y / breaker keeps tripping")
+    result = await cat.categorize("x / y / breaker keeps tripping", job_type_defs=_DEFS)
     assert result is not None and result[0] == "Electrical" and result[1] == 1.0
 
 
@@ -61,16 +71,16 @@ async def test_categorize_clamps_confidence(monkeypatch) -> None:
 async def test_categorize_http_error_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(cat, "get_settings", lambda: _settings())
     respx.post(url__regex=_GEMINI_URL).mock(return_value=httpx.Response(500, text="boom"))
-    assert await cat.categorize("x / y / something") is None
+    assert await cat.categorize("x / y / something", job_type_defs=_DEFS) is None
 
 
 async def test_categorize_no_key_is_noop(monkeypatch) -> None:
     monkeypatch.setattr(cat, "get_settings", lambda: _settings(key=""))
     # No respx route registered — must not make a call.
-    assert await cat.categorize("x / y / leak") is None
+    assert await cat.categorize("x / y / leak", job_type_defs=_DEFS) is None
 
 
 async def test_categorize_no_text_is_noop(monkeypatch) -> None:
     monkeypatch.setattr(cat, "get_settings", lambda: _settings())
-    assert await cat.categorize(None) is None
-    assert await cat.categorize("   ") is None
+    assert await cat.categorize(None, job_type_defs=_DEFS) is None
+    assert await cat.categorize("   ", job_type_defs=_DEFS) is None

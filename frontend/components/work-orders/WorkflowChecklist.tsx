@@ -163,6 +163,7 @@ export function WorkflowChecklist({
   wo,
   vendorControl,
   notifyControl,
+  variant = 'card',
 }: {
   wo: WorkOrderDetail
   /** Optional interactive widget rendered in the "Sub-vendor assigned"
@@ -171,6 +172,9 @@ export function WorkflowChecklist({
   /** Optional interactive widget rendered in the "Vendor notified"
    * row. When present, replaces the row's detail text. */
   notifyControl?: ReactNode
+  /** 'card' = self-contained ringed card with its own header (default).
+   * 'bare' = just the stage list, for embedding under the stepper. */
+  variant?: 'card' | 'bare'
 }) {
   const stages = deriveStages(wo)
 
@@ -203,17 +207,8 @@ export function WorkflowChecklist({
       : [row],
   )
 
-  return (
-    <div className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
-      <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-          Workflow
-        </h2>
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-          Pipeline stages — green = done, gray = pending or not yet tracked.
-        </p>
-      </header>
-      <ul role="list" className="divide-y divide-gray-200 dark:divide-white/10">
+  const list = (
+    <ul role="list" className="divide-y divide-gray-200 dark:divide-white/10">
         {rows.map((row) => {
           if (row.kind === 'sc_done_group') {
             return (
@@ -277,7 +272,22 @@ export function WorkflowChecklist({
             </li>
           )
         })}
-      </ul>
+    </ul>
+  )
+
+  if (variant === 'bare') return list
+
+  return (
+    <div className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
+      <header className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+          Workflow
+        </h2>
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+          Pipeline stages — green = done, gray = pending or not yet tracked.
+        </p>
+      </header>
+      {list}
     </div>
   )
 }

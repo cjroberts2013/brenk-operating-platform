@@ -103,7 +103,10 @@ def test_problem_summary_takes_last_segment() -> None:
         "Building #: Office / "
         "Side door to office leaks during rain through the top of the door."
     )
-    assert problem_summary(desc) == "Side door to office leaks during rain through the top of the door."
+    assert (
+        problem_summary(desc)
+        == "Side door to office leaks during rain through the top of the door."
+    )
 
 
 def test_problem_summary_edge_cases() -> None:

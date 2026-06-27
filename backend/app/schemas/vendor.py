@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.work_order import TradeRef
+from app.schemas.job_type import JobTypeRef
 
 
 class _OrmModel(BaseModel):
@@ -42,9 +42,9 @@ class VendorBase(BaseModel):
     markup_notes: str | None = None
     communication_notes: str | None = None
 
-    trade_ids: list[int] = Field(
+    job_type_ids: list[int] = Field(
         default_factory=list,
-        description="IDs of trades this vendor specializes in",
+        description="IDs of job types (skills) this vendor does",
     )
 
 
@@ -72,9 +72,9 @@ class VendorUpdate(BaseModel):
     markup_notes: str | None = None
     communication_notes: str | None = None
 
-    trade_ids: list[int] | None = Field(
+    job_type_ids: list[int] | None = Field(
         default=None,
-        description="If present, replaces the vendor's trade list entirely",
+        description="If present, replaces the vendor's skill list entirely",
     )
 
 
@@ -98,7 +98,29 @@ class VendorSummary(_OrmModel):
     markup_notes: str | None
     communication_notes: str | None
     active_work_orders: int
-    trade_specializations: list[TradeRef]
+    skills: list[JobTypeRef]
+
+    @classmethod
+    def from_vendor(cls, vendor: object, active_count: int) -> "VendorSummary":
+        """Build a summary from a Vendor ORM row + its (separately computed)
+        open-WO count. Shared by the vendors list and the suggestion service
+        so the field mapping lives in exactly one place."""
+        return cls(
+            id=vendor.id,  # type: ignore[attr-defined]
+            name=vendor.name,  # type: ignore[attr-defined]
+            phone=vendor.phone,  # type: ignore[attr-defined]
+            email=vendor.email,  # type: ignore[attr-defined]
+            notes=vendor.notes,  # type: ignore[attr-defined]
+            is_active=vendor.is_active,  # type: ignore[attr-defined]
+            contact_preference=vendor.contact_preference,  # type: ignore[attr-defined]
+            payment_terms=vendor.payment_terms,  # type: ignore[attr-defined]
+            service_area=vendor.service_area,  # type: ignore[attr-defined]
+            mobile_app_capable=vendor.mobile_app_capable,  # type: ignore[attr-defined]
+            markup_notes=vendor.markup_notes,  # type: ignore[attr-defined]
+            communication_notes=vendor.communication_notes,  # type: ignore[attr-defined]
+            skills=vendor.job_types,  # type: ignore[attr-defined]
+            active_work_orders=active_count,
+        )
 
 
 class VendorDetail(_OrmModel):
@@ -121,7 +143,7 @@ class VendorDetail(_OrmModel):
     markup_notes: str | None
     communication_notes: str | None
 
-    trade_specializations: list[TradeRef]
+    skills: list[JobTypeRef]
     active_work_orders: int
 
     created_at: datetime
@@ -133,3 +155,45 @@ class VendorListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# -----------------------------------------------------------------------------
+# Vendor suggestions (assign-step recommendations)
+# -----------------------------------------------------------------------------
+
+
+class VendorSuggestionAxis(BaseModel):
+    """One scoring axis (trade / location / workload) with a human reason."""
+
+    score: float
+    reason: str
+
+
+class VendorSuggestion(BaseModel):
+    """A scored vendor for a work order, with a per-axis breakdown and a
+    composed one-line reason ("Does Electrical · covers Austin · 1 active job").
+    """
+
+    vendor: VendorSummary
+    composite_score: float
+    trade: VendorSuggestionAxis
+    location: VendorSuggestionAxis
+    workload: VendorSuggestionAxis
+    reason: str
+    # This vendor is already assigned to the WO (kept in `ranked`, excluded
+    # from `top_pick`).
+    is_current: bool
+
+
+class VendorSuggestionResponse(BaseModel):
+    """Ranked vendor suggestions for one work order's assign step."""
+
+    # Best non-current candidate, only when it clears the strong-match
+    # threshold; null → the UI degrades to the manual dropdown.
+    top_pick: VendorSuggestion | None
+    # All trade-eligible vendors, best-first (includes the current one, flagged).
+    ranked: list[VendorSuggestion]
+    # The WO had a known trade, so the trade gate was applied.
+    has_trade: bool
+    # The WO's city, echoed for transparency in the UI.
+    wo_city: str | None

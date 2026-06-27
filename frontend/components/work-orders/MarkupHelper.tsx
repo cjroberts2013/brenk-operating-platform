@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -9,10 +8,7 @@ import {
   LockClosedIcon,
 } from '@heroicons/react/24/outline'
 
-import {
-  saveInvoiceAction,
-  setPaidAction,
-} from '@/app/(app)/work-orders/[id]/markup-actions'
+import { saveInvoiceAction } from '@/app/(app)/work-orders/[id]/markup-actions'
 import type { WorkOrderDetail } from '@/lib/api/types'
 import { money } from '@/lib/format'
 
@@ -85,7 +81,6 @@ export function MarkupHelper({
   const suggested = wo.suggested_markup_percent ?? null
   const suggestedLabel = wo.suggested_markup_label ?? null
   const isPriced = wo.brenk_markup_percent !== null || hasOverride
-  const isPaid = Boolean(wo.brenk_paid_at)
   const nte = wo.nte ? Number(wo.nte) : null
 
   // Live calculation: subtotal = labor + material; total = subtotal × (1 + markup/100);
@@ -195,14 +190,6 @@ export function MarkupHelper({
         setPriceInput('')
         setSavedTick((n) => n + 1)
       }
-    })
-  }
-
-  function togglePaid() {
-    setError(null)
-    startTransition(async () => {
-      const result = await setPaidAction(wo.id, !isPaid)
-      if (result.error) setError(result.error)
     })
   }
 
@@ -418,46 +405,6 @@ export function MarkupHelper({
             </span>
           ) : null}
         </div>
-      </div>
-
-      <div className="border-t border-gray-200 px-4 py-3 dark:border-white/10">
-        {isPaid ? (
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
-              <CheckCircleIcon className="size-4" />
-              Marked paid {formatRelative(wo.brenk_paid_at)}
-            </div>
-            <button
-              type="button"
-              onClick={togglePaid}
-              disabled={pending}
-              className="text-xs text-gray-500 underline hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            >
-              Undo (clear paid date)
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={togglePaid}
-            disabled={pending}
-            className="w-full rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
-          >
-            Mark paid
-          </button>
-        )}
-        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          Use this once the client has paid Brenk for this work. When
-          ServiceChannel marks the invoice paid, this is set automatically;
-          the invoice shows as Paid on the{' '}
-          <Link
-            href="/invoices"
-            className="text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
-          >
-            Invoices
-          </Link>{' '}
-          page.
-        </p>
       </div>
     </details>
   )

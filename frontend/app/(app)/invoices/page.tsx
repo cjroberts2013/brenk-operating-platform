@@ -36,7 +36,7 @@ const INV_STATUS_TABS = [
   { key: 'all', label: 'All' },
 ] as const
 type InvStatus = (typeof INV_STATUS_TABS)[number]['key']
-const INV_PAGE_SIZE = 25
+const INV_PAGE_SIZE = 15
 
 function parseTab(value: string | string[] | undefined): InvoiceTab {
   const raw = Array.isArray(value) ? value[0] : value

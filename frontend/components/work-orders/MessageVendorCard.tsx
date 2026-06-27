@@ -13,18 +13,19 @@ import {
   ChatBubbleLeftRightIcon,
   CheckIcon,
   ClipboardDocumentIcon,
-  EnvelopeIcon,
+  ExclamationTriangleIcon,
   PaperAirplaneIcon,
 } from '@heroicons/react/20/solid'
 
 import { sendVendorEmailAction } from '@/app/(app)/work-orders/actions'
+import type { VendorEmailResult } from '@/lib/api/work-orders'
 import type { VendorMessage, WorkOrderAttachment } from '@/lib/api/types'
 
 /**
- * "Message vendor" card. When the vendor prefers email, Daryl can review
- * and send the message (photos attached) straight through Resend. For any
- * other preference it stays a copy-and-send-yourself helper (with a
- * prefilled text/email link and downloadable photos to attach manually).
+ * "Message vendor" card. Email always goes through Resend (from the business
+ * address, photos attached, reply-to Daryl) behind a review-and-confirm
+ * dialog — never the device mail client. Texting stays a prefilled sms: link
+ * for now (no Twilio yet). Copy is always available.
  */
 export function MessageVendorCard({
   workOrderId,
@@ -35,7 +36,18 @@ export function MessageVendorCard({
   message: VendorMessage
   attachments: WorkOrderAttachment[]
 }) {
+  const router = useRouter()
   const [copied, setCopied] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [result, setResult] = useState<VendorEmailResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, startTransition] = useTransition()
+
+  const hasEmail = !!message.to_email
+  const prefLabel = formatPreference(message.contact_preference)
+  const smsHref = message.to_phone
+    ? `sms:${message.to_phone}?&body=${encodeURIComponent(message.body)}`
+    : null
 
   async function copy() {
     try {
@@ -47,9 +59,22 @@ export function MessageVendorCard({
     }
   }
 
-  const canEmail =
-    message.contact_preference === 'email' && !!message.to_email
-  const prefLabel = formatPreference(message.contact_preference)
+  function send() {
+    setError(null)
+    startTransition(async () => {
+      const res = await sendVendorEmailAction(workOrderId)
+      if (res.error) {
+        setError(res.error)
+      } else {
+        setResult(res.result ?? null)
+        setOpen(false)
+        router.refresh()
+      }
+    })
+  }
+
+  const sent = result !== null
+  const dropped = result ? result.photos_total - result.photos_attached : 0
 
   return (
     <section className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
@@ -69,28 +94,89 @@ export function MessageVendorCard({
           {message.body}
         </pre>
 
-        {canEmail ? (
-          <EmailSend
-            workOrderId={workOrderId}
-            message={message}
-            onCopy={copy}
-            copied={copied}
-          />
+        {sent && result ? (
+          <div className="rounded-md bg-green-50 px-3 py-2 dark:bg-green-950/40">
+            <p className="flex items-center gap-1.5 text-sm text-green-700 dark:text-green-300">
+              <CheckIcon className="size-4" />
+              Emailed to {result.to_email}.
+            </p>
+            {dropped > 0 ? (
+              <p className="mt-1 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                <ExclamationTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                {dropped} of {result.photos_total} photo
+                {result.photos_total === 1 ? '' : 's'} couldn&apos;t be attached.
+                Download {dropped === 1 ? 'it' : 'them'} below and send separately.
+              </p>
+            ) : result.photos_total > 0 ? (
+              <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">
+                {result.photos_attached} photo
+                {result.photos_attached === 1 ? '' : 's'} attached.
+              </p>
+            ) : null}
+          </div>
         ) : (
-          <ManualSend message={message} onCopy={copy} copied={copied} />
+          <div className="flex flex-wrap gap-2">
+            {hasEmail ? (
+              <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500"
+              >
+                <PaperAirplaneIcon className="size-4" />
+                Send email
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={copy}
+              className={
+                'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-semibold ' +
+                (hasEmail
+                  ? 'text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5'
+                  : 'bg-indigo-500 text-white hover:bg-indigo-400')
+              }
+            >
+              {copied ? (
+                <>
+                  <CheckIcon className="size-4" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <ClipboardDocumentIcon className="size-4" />
+                  Copy message
+                </>
+              )}
+            </button>
+            {smsHref ? (
+              <a
+                href={smsHref}
+                className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5"
+              >
+                <ChatBubbleLeftRightIcon className="size-4" />
+                Text
+              </a>
+            ) : null}
+          </div>
         )}
 
-        {/* Photos. Email auto-attaches them; the manual path needs them
-            downloaded and attached by hand. */}
+        {error && !open ? (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </p>
+        ) : null}
+
+        {/* Photos. The email attaches them automatically; texting/copying
+            needs them downloaded and attached by hand. */}
         {attachments.length > 0 ? (
           <div className="border-t border-gray-200 pt-3 dark:border-white/10">
             <p className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
               Photos ({attachments.length})
             </p>
             <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-              {canEmail
-                ? 'These attach to the email automatically.'
-                : "Text/email won't attach these automatically. Tap each photo to download it, then add them to your message after pasting."}
+              {hasEmail
+                ? 'These attach to the email automatically. To text them, download each and attach it yourself.'
+                : "Text/copy won't attach these. Download each photo, then add them to your message."}
             </p>
             <ul className="space-y-1">
               {attachments.map((att) => (
@@ -108,63 +194,6 @@ export function MessageVendorCard({
           </div>
         ) : null}
       </div>
-    </section>
-  )
-}
-
-function EmailSend({
-  workOrderId,
-  message,
-  onCopy,
-  copied,
-}: {
-  workOrderId: number
-  message: VendorMessage
-  onCopy: () => void
-  copied: boolean
-}) {
-  const router = useRouter()
-  const [open, setOpen] = useState(false)
-  const [sent, setSent] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [pending, startTransition] = useTransition()
-
-  function send() {
-    setError(null)
-    startTransition(async () => {
-      const result = await sendVendorEmailAction(workOrderId)
-      if (result.error) {
-        setError(result.error)
-      } else {
-        setSent(true)
-        setOpen(false)
-        router.refresh()
-      }
-    })
-  }
-
-  if (sent) {
-    return (
-      <p className="flex items-center gap-1.5 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-950/40 dark:text-green-300">
-        <CheckIcon className="size-4" />
-        Emailed to {message.to_email}.
-      </p>
-    )
-  }
-
-  return (
-    <>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500"
-        >
-          <PaperAirplaneIcon className="size-4" />
-          Send email
-        </button>
-        <CopyButton onCopy={onCopy} copied={copied} subtle />
-      </div>
 
       <Dialog open={open} onClose={setOpen} className="relative z-50">
         <DialogBackdrop
@@ -181,7 +210,7 @@ function EmailSend({
                 Email this work order to the vendor
               </DialogTitle>
               <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                Review before sending. Replies come back to you.
+                Sends from Brenk Facility Services; replies come back to you.
               </p>
             </div>
 
@@ -225,81 +254,7 @@ function EmailSend({
           </DialogPanel>
         </div>
       </Dialog>
-    </>
-  )
-}
-
-function ManualSend({
-  message,
-  onCopy,
-  copied,
-}: {
-  message: VendorMessage
-  onCopy: () => void
-  copied: boolean
-}) {
-  const smsHref = message.to_phone
-    ? `sms:${message.to_phone}?&body=${encodeURIComponent(message.body)}`
-    : null
-  const mailHref = message.to_email
-    ? `mailto:${message.to_email}?subject=${encodeURIComponent(
-        message.subject,
-      )}&body=${encodeURIComponent(message.body)}`
-    : null
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      <CopyButton onCopy={onCopy} copied={copied} />
-      {smsHref ? (
-        <a
-          href={smsHref}
-          className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5"
-        >
-          <ChatBubbleLeftRightIcon className="size-4" />
-          Text
-        </a>
-      ) : null}
-      {mailHref ? (
-        <a
-          href={mailHref}
-          className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5"
-        >
-          <EnvelopeIcon className="size-4" />
-          Email
-        </a>
-      ) : null}
-    </div>
-  )
-}
-
-function CopyButton({
-  onCopy,
-  copied,
-  subtle = false,
-}: {
-  onCopy: () => void
-  copied: boolean
-  subtle?: boolean
-}) {
-  const base =
-    'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-semibold'
-  const cls = subtle
-    ? `${base} text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5`
-    : `${base} bg-indigo-500 text-white hover:bg-indigo-400`
-  return (
-    <button type="button" onClick={onCopy} className={cls}>
-      {copied ? (
-        <>
-          <CheckIcon className="size-4" />
-          Copied
-        </>
-      ) : (
-        <>
-          <ClipboardDocumentIcon className="size-4" />
-          Copy message
-        </>
-      )}
-    </button>
+    </section>
   )
 }
 

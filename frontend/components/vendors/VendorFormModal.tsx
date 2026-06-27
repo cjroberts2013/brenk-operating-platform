@@ -10,12 +10,12 @@ import {
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
 import {
-  createTradeAction,
+  createSkillAction,
   createVendorAction,
   updateVendorAction,
   type VendorActionState,
 } from '@/app/(app)/vendors/actions'
-import type { TradeRef, VendorSummary } from '@/lib/api/types'
+import type { JobType, VendorSummary } from '@/lib/api/types'
 
 const INITIAL_STATE: VendorActionState = { error: null, attempt: 0 }
 
@@ -38,14 +38,14 @@ export type VendorFormModalProps = {
   onClose: () => void
   /** When set, the modal is in "edit" mode for this vendor. Null → "create". */
   vendor: VendorSummary | null
-  trades: TradeRef[]
+  jobTypes: JobType[]
 }
 
 export function VendorFormModal({
   open,
   onClose,
   vendor,
-  trades,
+  jobTypes,
 }: VendorFormModalProps) {
   const isEdit = vendor !== null
 
@@ -69,53 +69,49 @@ export function VendorFormModal({
     }
   }, [state.attempt, state.error, pending, onClose])
 
-  // Trade selection lives in client state so newly-created trades can be
-  // appended + auto-selected without remounting the form. Resets when the
-  // modal flips between vendors (the key on this component should change
-  // — but as a safety net the effect below reconciles when `vendor` changes).
-  const [tradesList, setTradesList] = useState<TradeRef[]>(trades)
-  const [selectedTradeIds, setSelectedTradeIds] = useState<Set<number>>(
-    () => new Set((vendor?.trade_specializations ?? []).map((t) => t.id)),
+  // Skill selection lives in client state so newly-created job types can be
+  // appended + auto-selected without remounting the form. Seed the available
+  // list with the active job types plus any skills already on the vendor
+  // (which may include a since-retired type, so it still shows as selected).
+  const [skillsList, setSkillsList] = useState<JobType[]>(jobTypes)
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<number>>(
+    () => new Set((vendor?.skills ?? []).map((t) => t.id)),
   )
-  const [tradeQuery, setTradeQuery] = useState('')
-  const [creatingTrade, setCreatingTrade] = useState(false)
-  const [tradeCreateError, setTradeCreateError] = useState<string | null>(null)
+  const [skillQuery, setSkillQuery] = useState('')
+  const [creatingSkill, setCreatingSkill] = useState(false)
+  const [skillCreateError, setSkillCreateError] = useState<string | null>(null)
 
   // When the parent swaps which vendor is being edited (modal stays
-  // mounted across opens), resync the selected trades to the new vendor.
+  // mounted across opens), resync the selected skills to the new vendor.
   useEffect(() => {
-    setSelectedTradeIds(
-      new Set((vendor?.trade_specializations ?? []).map((t) => t.id)),
-    )
-    setTradeQuery('')
-    setTradeCreateError(null)
+    setSelectedSkillIds(new Set((vendor?.skills ?? []).map((t) => t.id)))
+    setSkillQuery('')
+    setSkillCreateError(null)
   }, [vendor?.id])
 
-  // Also keep the local trades list in sync if the parent passes more
-  // (rare — usually only happens on initial mount and after a successful
-  // create that revalidates the page).
+  // Keep the available list in sync with the active job types, and fold in
+  // any of this vendor's current skills that aren't active (retired types),
+  // so they still render as selected chips.
   useEffect(() => {
-    setTradesList((prev) => {
-      // Merge: keep any locally-created trades not in the new list.
-      const seen = new Set(trades.map((t) => t.id))
-      const localOnly = prev.filter((t) => !seen.has(t.id))
-      return [...trades, ...localOnly].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      )
+    const base = [...jobTypes, ...(vendor?.skills ?? [])]
+    const byId = new Map(base.map((t) => [t.id, t]))
+    setSkillsList((prev) => {
+      for (const t of prev) if (!byId.has(t.id)) byId.set(t.id, t)
+      return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
     })
-  }, [trades])
+  }, [jobTypes, vendor?.id])
 
-  const filteredTrades = useMemo(() => {
-    const q = tradeQuery.trim().toLowerCase()
-    if (!q) return tradesList
-    return tradesList.filter((t) => t.name.toLowerCase().includes(q))
-  }, [tradesList, tradeQuery])
+  const filteredSkills = useMemo(() => {
+    const q = skillQuery.trim().toLowerCase()
+    if (!q) return skillsList
+    return skillsList.filter((t) => t.name.toLowerCase().includes(q))
+  }, [skillsList, skillQuery])
 
   const showCreateOption =
-    tradeQuery.trim().length > 0 && filteredTrades.length === 0
+    skillQuery.trim().length > 0 && filteredSkills.length === 0
 
-  function toggleTrade(id: number) {
-    setSelectedTradeIds((prev) => {
+  function toggleSkill(id: number) {
+    setSelectedSkillIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -123,24 +119,24 @@ export function VendorFormModal({
     })
   }
 
-  async function handleCreateTrade() {
-    const name = tradeQuery.trim()
-    if (!name || creatingTrade) return
-    setCreatingTrade(true)
-    setTradeCreateError(null)
-    const result = await createTradeAction(name)
-    setCreatingTrade(false)
+  async function handleCreateSkill() {
+    const name = skillQuery.trim()
+    if (!name || creatingSkill) return
+    setCreatingSkill(true)
+    setSkillCreateError(null)
+    const result = await createSkillAction(name)
+    setCreatingSkill(false)
     if (result.error) {
-      setTradeCreateError(result.error)
+      setSkillCreateError(result.error)
       return
     }
-    if (result.trade) {
-      const newTrade = result.trade
-      setTradesList((prev) =>
-        [...prev, newTrade].sort((a, b) => a.name.localeCompare(b.name)),
+    if (result.skill) {
+      const newSkill = result.skill
+      setSkillsList((prev) =>
+        [...prev, newSkill].sort((a, b) => a.name.localeCompare(b.name)),
       )
-      setSelectedTradeIds((prev) => new Set([...prev, newTrade.id]))
-      setTradeQuery('')
+      setSelectedSkillIds((prev) => new Set([...prev, newSkill.id]))
+      setSkillQuery('')
     }
   }
 
@@ -153,9 +149,9 @@ export function VendorFormModal({
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <DialogPanel
           transition
-          className="relative w-full max-w-2xl rounded-lg bg-white shadow-xl ring-1 ring-black/5 transition duration-200 data-closed:translate-y-2 data-closed:opacity-0 dark:bg-gray-900 dark:ring-white/10"
+          className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl ring-1 ring-black/5 transition duration-200 data-closed:translate-y-2 data-closed:opacity-0 dark:bg-gray-900 dark:ring-white/10"
         >
-          <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-white/10">
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-white/10">
             <DialogTitle className="text-base font-semibold text-gray-900 dark:text-white">
               {isEdit ? `Edit vendor — ${vendor!.name}` : 'Add vendor'}
             </DialogTitle>
@@ -169,7 +165,8 @@ export function VendorFormModal({
             </button>
           </div>
 
-          <form action={formAction} className="space-y-4 px-6 py-5">
+          <form action={formAction} className="flex min-h-0 flex-1 flex-col">
+            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
             {isEdit ? (
               <input type="hidden" name="id" value={vendor!.id} />
             ) : null}
@@ -274,82 +271,72 @@ export function VendorFormModal({
               </Field>
             </Row>
 
-            <Field label="Trade specializations">
-              {tradesList.length === 0 && !tradeQuery ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  No trades available yet — run a work-order sync to
-                  populate the trades table, or type a name below to
-                  create one.
-                </p>
-              ) : null}
-
+            <Field label="Skills (job types)">
               <input
                 type="search"
-                value={tradeQuery}
+                value={skillQuery}
                 onChange={(e) => {
-                  setTradeQuery(e.target.value)
-                  if (tradeCreateError) setTradeCreateError(null)
+                  setSkillQuery(e.target.value)
+                  if (skillCreateError) setSkillCreateError(null)
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && showCreateOption) {
                     // Prevent submitting the outer form when the user
-                    // hits Enter to confirm trade creation.
+                    // hits Enter to confirm creating a new job type.
                     e.preventDefault()
-                    void handleCreateTrade()
+                    void handleCreateSkill()
                   }
                 }}
-                placeholder="Search trades… or type a new one to create"
+                placeholder="Search skills… or type a new one to create"
                 className={`mb-2 ${inputClass}`}
               />
 
-              {/* Hidden inputs carry the selected trade ids into the form
-                  submission — keeps the FormData.getAll('trade_ids')
+              {/* Hidden inputs carry the selected job-type ids into the form
+                  submission — keeps the FormData.getAll('job_type_ids')
                   contract that the server action expects. */}
-              {[...selectedTradeIds].map((id) => (
-                <input
-                  key={id}
-                  type="hidden"
-                  name="trade_ids"
-                  value={id}
-                />
+              {[...selectedSkillIds].map((id) => (
+                <input key={id} type="hidden" name="job_type_ids" value={id} />
               ))}
 
               <div className="flex flex-wrap gap-1.5">
-                {filteredTrades.map((trade) => {
-                  const selected = selectedTradeIds.has(trade.id)
+                {filteredSkills.map((skill) => {
+                  const selected = selectedSkillIds.has(skill.id)
                   return (
                     <button
-                      key={trade.id}
+                      key={skill.id}
                       type="button"
-                      onClick={() => toggleTrade(trade.id)}
+                      onClick={() => toggleSkill(skill.id)}
                       className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition-colors ${
                         selected
                           ? 'bg-indigo-500 text-white ring-indigo-400 dark:bg-indigo-500 dark:text-white dark:ring-indigo-400'
                           : 'bg-gray-100 text-gray-700 ring-gray-300 hover:bg-gray-200 dark:bg-white/5 dark:text-gray-300 dark:ring-white/10 dark:hover:bg-white/10'
                       }`}
                     >
-                      {trade.name}
+                      {skill.name}
                     </button>
                   )
                 })}
                 {showCreateOption ? (
                   <button
                     type="button"
-                    onClick={handleCreateTrade}
-                    disabled={creatingTrade}
+                    onClick={handleCreateSkill}
+                    disabled={creatingSkill}
                     className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-500/30 hover:bg-green-500/20 disabled:opacity-60 dark:text-green-300"
                   >
                     <PlusIcon className="size-3" />
-                    {creatingTrade
-                      ? 'Creating…'
-                      : `Create "${tradeQuery.trim()}"`}
+                    {creatingSkill ? 'Creating…' : `Create "${skillQuery.trim()}"`}
                   </button>
                 ) : null}
               </div>
 
-              {tradeCreateError ? (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                These are the shared job types — the same list the AI uses to
+                categorize work orders. Manage the full list in Settings.
+              </p>
+
+              {skillCreateError ? (
                 <p className="mt-2 text-xs text-red-600 dark:text-red-400">
-                  {tradeCreateError}
+                  {skillCreateError}
                 </p>
               ) : null}
             </Field>
@@ -388,8 +375,9 @@ export function VendorFormModal({
                 {state.error}
               </p>
             ) : null}
+            </div>
 
-            <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4 dark:border-white/10">
+            <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-200 px-6 py-4 dark:border-white/10">
               <button
                 type="button"
                 onClick={onClose}

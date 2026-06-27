@@ -1,8 +1,8 @@
 """Gemini-backed work-order categorization.
 
-Classifies a work order into one Brenk job category (app/services/categories.py)
-from its description's problem line — token-conscious: a tiny text-only
-prompt, structured output (a category enum + confidence), Flash Lite.
+Classifies a work order into one Brenk job type (the shared `job_types`
+taxonomy) from its description's problem line — token-conscious: a tiny
+text-only prompt, structured output (a type enum + confidence), Flash Lite.
 
 No SDK — one httpx POST to the Generative Language API, mirroring the
 Resend pattern in app/services/email.py. Returns None on any failure or
@@ -24,7 +24,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.models.work_order import WorkOrder
-from app.services.categories import JOB_CATEGORIES, JOB_CATEGORY_DEFS, is_valid_category
+from app.services.job_types import list_job_types
 from app.services.vendor_message import problem_summary
 
 logger = structlog.get_logger(__name__)
@@ -36,35 +36,43 @@ DEFAULT_BATCH_LIMIT = 50
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _TIMEOUT_SECONDS = 20.0
 
-_INSTRUCTIONS = (
-    "You categorize commercial facility-maintenance work orders into exactly "
-    "one job category for a general contractor. Choose the single best category "
-    "from the list based mainly on the work described. A suggested trade may be "
-    "given but is often wrong — rely on the description. Categories:\n"
-    + "\n".join(f"- {name}: {desc}" for name, desc in JOB_CATEGORY_DEFS)
-)
 
-# Structured-output schema: constrains the model to a valid category + a
-# 0..1 confidence, so the response is a tiny, parse-safe JSON object.
-_RESPONSE_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {
-        "category": {"type": "STRING", "enum": JOB_CATEGORIES},
-        "confidence": {"type": "NUMBER"},
-    },
-    "required": ["category", "confidence"],
-    "propertyOrdering": ["category", "confidence"],
-}
+def _build_instructions(job_type_defs: list[tuple[str, str]]) -> str:
+    return (
+        "You categorize commercial facility-maintenance work orders into exactly "
+        "one job type for a general contractor. Choose the single best type "
+        "from the list based mainly on the work described. A suggested trade may be "
+        "given but is often wrong — rely on the description. Job types:\n"
+        + "\n".join(f"- {name}: {desc}" for name, desc in job_type_defs)
+    )
+
+
+def _build_schema(names: list[str]) -> dict:
+    """Structured-output schema constraining the model to a valid job type +
+    a 0..1 confidence, so the response is a tiny, parse-safe JSON object."""
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "category": {"type": "STRING", "enum": names},
+            "confidence": {"type": "NUMBER"},
+        },
+        "required": ["category", "confidence"],
+        "propertyOrdering": ["category", "confidence"],
+    }
 
 
 async def categorize(
-    description: str | None, trade_hint: str | None = None
+    description: str | None,
+    trade_hint: str | None = None,
+    *,
+    job_type_defs: list[tuple[str, str]],
 ) -> tuple[str, float] | None:
-    """Return (category, confidence) for a WO, or None if it can't be done.
+    """Return (job_type, confidence) for a WO, or None if it can't be done.
 
-    `description` is the raw SC description; we send only its problem line
-    (last "/"-segment). None when there's no usable text, no API key, or the
-    call/parse fails.
+    `job_type_defs` is the (name, description) taxonomy to classify into —
+    loaded from the DB by the caller so the list stays editable. `description`
+    is the raw SC description; we send only its problem line (last "/"-segment).
+    None when there's no usable text, no API key, or the call/parse fails.
     """
     settings = get_settings()
     if not settings.GEMINI_API_KEY:
@@ -75,7 +83,11 @@ async def categorize(
     if not problem or problem == "(none provided)":
         return None
 
-    prompt = _INSTRUCTIONS + "\n\nWork order:\n"
+    names = [name for name, _ in job_type_defs]
+    if not names:
+        return None
+
+    prompt = _build_instructions(job_type_defs) + "\n\nWork order:\n"
     if trade_hint:
         prompt += f"Suggested trade (may be wrong): {trade_hint}\n"
     prompt += f"Description: {problem}"
@@ -86,7 +98,7 @@ async def categorize(
             "temperature": 0,
             "maxOutputTokens": 1024,
             "responseMimeType": "application/json",
-            "responseSchema": _RESPONSE_SCHEMA,
+            "responseSchema": _build_schema(names),
         },
     }
     url = f"{_API_BASE}/models/{settings.GEMINI_MODEL}:generateContent"
@@ -106,11 +118,11 @@ async def categorize(
         logger.error("categorize.rejected", status=response.status_code, body=response.text[:300])
         return None
 
-    return _parse(response.json())
+    return _parse(response.json(), valid_names=set(names))
 
 
-def _parse(body: dict) -> tuple[str, float] | None:
-    """Pull (category, confidence) out of a generateContent response."""
+def _parse(body: dict, valid_names: set[str]) -> tuple[str, float] | None:
+    """Pull (job_type, confidence) out of a generateContent response."""
     try:
         text = body["candidates"][0]["content"]["parts"][0]["text"]
         data = json.loads(text)
@@ -120,7 +132,7 @@ def _parse(body: dict) -> tuple[str, float] | None:
         logger.error("categorize.parse_failed", error=str(exc), body=str(body)[:300])
         return None
 
-    if not is_valid_category(category):
+    if category not in valid_names:
         logger.warning("categorize.invalid_category", category=category)
         return None
 
@@ -139,6 +151,13 @@ async def categorize_uncategorized(
     """
     if not get_settings().GEMINI_API_KEY:
         logger.warning("categorize_uncategorized.skip_no_api_key")
+        return {"scanned": 0, "categorized": 0, "skipped": 0}
+
+    # Load the editable taxonomy once and classify everyone against it.
+    job_types = await list_job_types(session)
+    job_type_defs = [(jt.name, jt.description or "") for jt in job_types]
+    if not job_type_defs:
+        logger.warning("categorize_uncategorized.no_job_types")
         return {"scanned": 0, "categorized": 0, "skipped": 0}
 
     rows = (
@@ -161,7 +180,9 @@ async def categorize_uncategorized(
     categorized = 0
     for wo in rows:
         trade_hint = wo.trade.name if wo.trade else None
-        result = await categorize(wo.description, trade_hint=trade_hint)
+        result = await categorize(
+            wo.description, trade_hint=trade_hint, job_type_defs=job_type_defs
+        )
         if result is None:
             continue
         category, confidence = result

@@ -37,7 +37,9 @@ async def list_invoices(
     db: Annotated[AsyncSession, Depends(get_async_db)],
     status: Annotated[
         str | None,
-        Query(description="Filter by exact SC invoice status (Open, Approved, Paid, Rejected, Void, ...)."),
+        Query(
+            description="Filter by exact SC invoice status (Open, Approved, Paid, Rejected, Void, ...)."
+        ),
     ] = None,
     status_group: Annotated[
         str | None,
@@ -108,6 +110,4 @@ async def list_invoices(
         item.location_store_id = loc_store
         items.append(item)
 
-    return InvoiceListResponse(
-        items=items, total=total, page=page, page_size=page_size
-    )
+    return InvoiceListResponse(items=items, total=total, page=page, page_size=page_size)

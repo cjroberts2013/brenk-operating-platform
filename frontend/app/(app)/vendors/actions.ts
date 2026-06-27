@@ -3,11 +3,11 @@
 import { revalidatePath } from 'next/cache'
 
 import { ApiError } from '@/lib/api/server'
-import { createTrade } from '@/lib/api/trades'
+import { createJobType } from '@/lib/api/job-types'
 import * as vendorsApi from '@/lib/api/vendors'
 import type { VendorSyncSummary } from '@/lib/api/vendors'
 import type {
-  TradeRef,
+  JobType,
   VendorContactPreference,
   VendorCreate,
 } from '@/lib/api/types'
@@ -54,9 +54,9 @@ function buildPayloadFromForm(formData: FormData): VendorCreate {
   const mobile_app_capable: boolean | null =
     mobileAppRaw === 'yes' ? true : mobileAppRaw === 'no' ? false : null
 
-  // Trade ids arrive as repeated values: getAll returns string[].
-  const trade_ids = formData
-    .getAll('trade_ids')
+  // Job-type (skill) ids arrive as repeated values: getAll returns string[].
+  const job_type_ids = formData
+    .getAll('job_type_ids')
     .map((v) => Number(v))
     .filter((n) => Number.isFinite(n) && n > 0)
 
@@ -72,7 +72,7 @@ function buildPayloadFromForm(formData: FormData): VendorCreate {
     mobile_app_capable,
     markup_notes: get('markup_notes'),
     communication_notes: get('communication_notes'),
-    trade_ids,
+    job_type_ids,
   }
 }
 
@@ -129,16 +129,18 @@ export async function updateVendorAction(
   return { error: null, attempt }
 }
 
-export async function createTradeAction(
+/** Inline-create a job type from the vendor modal (e.g. a new trade arises
+ *  while tagging a vendor). The new type joins the shared taxonomy. */
+export async function createSkillAction(
   name: string,
-): Promise<{ trade?: TradeRef; error?: string }> {
+): Promise<{ skill?: JobType; error?: string }> {
   const trimmed = name.trim()
   if (!trimmed) {
     return { error: 'name is required' }
   }
   try {
-    const trade = await createTrade(trimmed)
-    return { trade }
+    const skill = await createJobType({ name: trimmed })
+    return { skill }
   } catch (err) {
     if (err instanceof ApiError) return { error: err.detail }
     throw err

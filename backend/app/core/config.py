@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "staging", "production"] = "development"
     LOG_LEVEL: str = "INFO"
     DEBUG: bool = False
+    # Echo every SQL statement to stdout. Off by default — it's a heavy
+    # firehose that noticeably slows local request handling. Decoupled from
+    # DEBUG so dev can keep DEBUG on without the query spam. Set SQL_ECHO=true
+    # only when actively debugging queries.
+    SQL_ECHO: bool = False
 
     # -------------------------------------------------------------------------
     # Database

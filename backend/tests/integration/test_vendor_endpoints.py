@@ -84,7 +84,7 @@ async def test_create_vendor_minimal(client: httpx.AsyncClient) -> None:
     body = response.json()
     assert body["name"] == "Acme Plumbing"
     assert body["is_active"] is True
-    assert body["trade_specializations"] == []
+    assert body["skills"] == []
     assert body["active_work_orders"] == 0
     await _delete(client, body["id"])
 
@@ -106,13 +106,13 @@ async def test_create_vendor_with_all_fields(client: httpx.AsyncClient) -> None:
     await _delete(client, body["id"])
 
 
-async def test_create_vendor_rejects_bad_trade_id(client: httpx.AsyncClient) -> None:
+async def test_create_vendor_rejects_bad_job_type_id(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/api/v1/vendors/",
-        json={"name": "Test", "trade_ids": [999999]},
+        json={"name": "Test", "job_type_ids": [999999]},
     )
     assert response.status_code == 400
-    assert "trade_ids" in response.json()["detail"].lower()
+    assert "job_type_ids" in response.json()["detail"].lower()
 
 
 async def test_create_vendor_requires_name(client: httpx.AsyncClient) -> None:

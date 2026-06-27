@@ -10,9 +10,7 @@ KEY = "brenk-webhook-test-key"
 
 
 def _sign(body: bytes, key: str = KEY) -> str:
-    return base64.b64encode(
-        hmac.new(key.encode(), body, hashlib.sha256).digest()
-    ).decode()
+    return base64.b64encode(hmac.new(key.encode(), body, hashlib.sha256).digest()).decode()
 
 
 def test_valid_signature_passes() -> None:

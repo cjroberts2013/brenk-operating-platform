@@ -28,9 +28,7 @@ TEST_KEY = "brenk-webhook-test-key"
 
 
 def _sign(body: bytes) -> str:
-    return base64.b64encode(
-        hmac.new(TEST_KEY.encode(), body, hashlib.sha256).digest()
-    ).decode()
+    return base64.b64encode(hmac.new(TEST_KEY.encode(), body, hashlib.sha256).digest()).decode()
 
 
 @pytest.fixture
@@ -83,10 +81,14 @@ async def test_empty_body_ping_acks_without_storing(
     assert resp.status_code == 200
     async with factory() as session:
         n = (
-            await session.execute(
-                select(WebhookEvent).where(WebhookEvent.event_type.like("ITEST_%"))
+            (
+                await session.execute(
+                    select(WebhookEvent).where(WebhookEvent.event_type.like("ITEST_%"))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert n == []  # ping stored nothing
 
 
@@ -94,17 +96,19 @@ async def test_invalid_signature_rejected_and_recorded(
     wh: tuple[httpx.AsyncClient, async_sessionmaker],
 ) -> None:
     ac, factory = wh
-    body = json.dumps(
-        {"EventType": "ITEST_BadSig", "Object": {"Id": 999000001}}
-    ).encode()
+    body = json.dumps({"EventType": "ITEST_BadSig", "Object": {"Id": 999000001}}).encode()
     resp = await ac.post(WEBHOOK_URL, content=body, headers={"Sign-Data": "nope"})
     assert resp.status_code == 401
     async with factory() as session:
         row = (
-            await session.execute(
-                select(WebhookEvent).where(WebhookEvent.event_type == "ITEST_BadSig")
+            (
+                await session.execute(
+                    select(WebhookEvent).where(WebhookEvent.event_type == "ITEST_BadSig")
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         assert row is not None
         assert row.signature_valid is False
         assert row.status == "invalid_signature"
@@ -114,9 +118,7 @@ async def test_valid_event_stored_pending_and_idempotent(
     wh: tuple[httpx.AsyncClient, async_sessionmaker],
 ) -> None:
     ac, factory = wh
-    body = json.dumps(
-        {"EventType": "ITEST_Valid", "Object": {"Id": 999000002}}
-    ).encode()
+    body = json.dumps({"EventType": "ITEST_Valid", "Object": {"Id": 999000002}}).encode()
     sig = _sign(body)
     first = await ac.post(WEBHOOK_URL, content=body, headers={"Sign-Data": sig})
     duplicate = await ac.post(WEBHOOK_URL, content=body, headers={"Sign-Data": sig})
@@ -124,10 +126,14 @@ async def test_valid_event_stored_pending_and_idempotent(
     assert duplicate.status_code == 200  # retry is a clean no-op
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(WebhookEvent).where(WebhookEvent.event_type == "ITEST_Valid")
+            (
+                await session.execute(
+                    select(WebhookEvent).where(WebhookEvent.event_type == "ITEST_Valid")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1  # dedupe key collapsed the redelivery
         assert rows[0].status == "pending"
         assert rows[0].signature_valid is True

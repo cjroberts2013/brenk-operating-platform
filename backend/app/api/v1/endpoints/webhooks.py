@@ -40,9 +40,7 @@ router = APIRouter()
 
 def _ack() -> Response:
     # Fresh Response per call (Response objects are single-use in Starlette).
-    return Response(
-        content='{"received": true}', media_type="application/json", status_code=200
-    )
+    return Response(content='{"received": true}', media_type="application/json", status_code=200)
 
 
 @router.api_route("/servicechannel", methods=["GET", "HEAD"])

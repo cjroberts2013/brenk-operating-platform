@@ -88,7 +88,7 @@ async def test_batch_categorizes_only_uncategorized(harness, monkeypatch) -> Non
     uid2 = await _seed_wo(factory, cid, 2, description="X / Y / Roof is leaking")
     done = await _seed_wo(factory, cid, 3, description="X / Y / already done", category="Plumbing")
 
-    async def fake_categorize(description, trade_hint=None):
+    async def fake_categorize(description, trade_hint=None, *, job_type_defs=None):
         return ("Electrical", 0.9)
 
     monkeypatch.setattr(cat, "categorize", fake_categorize)
@@ -126,7 +126,7 @@ async def test_batch_respects_limit(harness, monkeypatch) -> None:
     for n in range(1, 6):
         await _seed_wo(factory, cid, n, description=f"X / Y / problem {n}")
 
-    async def fake_categorize(description, trade_hint=None):
+    async def fake_categorize(description, trade_hint=None, *, job_type_defs=None):
         return ("Other", 0.5)
 
     monkeypatch.setattr(cat, "categorize", fake_categorize)

@@ -346,6 +346,15 @@ export type WorkOrderSyncSummary = {
 // Vendors
 // =============================================================================
 
+export type JobType = {
+  id: number
+  name: string
+  description: string | null
+  position: number
+  is_active: boolean
+  is_catchall: boolean
+}
+
 export type VendorContactPreference = 'sms' | 'call' | 'email' | 'other'
 
 export type VendorSummary = {
@@ -362,7 +371,32 @@ export type VendorSummary = {
   markup_notes: string | null
   communication_notes: string | null
   active_work_orders: number
-  trade_specializations: TradeRef[]
+  skills: JobType[]
+}
+
+export type VendorSuggestionAxis = {
+  score: number
+  reason: string
+}
+
+export type VendorSuggestion = {
+  vendor: VendorSummary
+  composite_score: number
+  trade: VendorSuggestionAxis
+  location: VendorSuggestionAxis
+  workload: VendorSuggestionAxis
+  reason: string
+  /** This vendor is already assigned to the WO (excluded from top_pick). */
+  is_current: boolean
+}
+
+export type VendorSuggestionResponse = {
+  /** Best non-current match, only when it clears the strong-match threshold;
+   *  null → the UI degrades to the manual dropdown. */
+  top_pick: VendorSuggestion | null
+  ranked: VendorSuggestion[]
+  has_trade: boolean
+  wo_city: string | null
 }
 
 export type VendorDetail = {
@@ -381,7 +415,7 @@ export type VendorDetail = {
   markup_notes: string | null
   communication_notes: string | null
 
-  trade_specializations: TradeRef[]
+  skills: JobType[]
   active_work_orders: number
 
   created_at: string
@@ -416,7 +450,7 @@ export type VendorCreate = {
   mobile_app_capable?: boolean | null
   markup_notes?: string | null
   communication_notes?: string | null
-  trade_ids?: number[]
+  job_type_ids?: number[]
 }
 
 /** Shape of the body for PATCH /api/v1/vendors/{id}. All fields optional. */

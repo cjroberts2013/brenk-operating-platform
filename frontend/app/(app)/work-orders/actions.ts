@@ -54,6 +54,31 @@ export async function assignVendorAction(
 }
 
 
+/** One-click assign for the suggestion panel. Imperative (vendor id passed
+ *  directly) rather than the FormData/useActionState shape of
+ *  `assignVendorAction`, since the suggested vendor is known up front. */
+export async function quickAssignVendorAction(
+  workOrderId: number,
+  vendorId: number,
+): Promise<{ error?: string }> {
+  if (!Number.isFinite(workOrderId) || workOrderId < 1) {
+    return { error: 'invalid work order id' }
+  }
+  if (!Number.isFinite(vendorId) || vendorId < 1) {
+    return { error: 'invalid vendor selection' }
+  }
+  try {
+    await patchWorkOrder(workOrderId, { assigned_vendor_id: vendorId })
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath('/work-orders')
+  revalidatePath('/vendors')
+  return {}
+}
+
+
 export type CategoryState = {
   error: string | null
   attempt: number

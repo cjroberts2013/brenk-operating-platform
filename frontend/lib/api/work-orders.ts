@@ -10,6 +10,7 @@ import { apiFetch } from './server'
 import type {
   InvoiceSubmitPreview,
   VendorMessage,
+  VendorSuggestionResponse,
   WorkOrderAttachment,
   WorkOrderDetail,
   WorkOrderListParams,
@@ -44,6 +45,14 @@ export function listWorkOrderAttachments(
 
 export function getVendorMessage(id: number): Promise<VendorMessage> {
   return apiFetch<VendorMessage>(`/api/v1/work-orders/${id}/vendor-message`)
+}
+
+export function getVendorSuggestions(
+  id: number,
+): Promise<VendorSuggestionResponse> {
+  return apiFetch<VendorSuggestionResponse>(
+    `/api/v1/work-orders/${id}/suggest-vendors`,
+  )
 }
 
 export function listCategories(): Promise<{ categories: string[] }> {

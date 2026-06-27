@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     categories,
     dashboard,
     invoices,
+    job_types,
     locations,
     reports,
     storefront,
@@ -28,6 +29,7 @@ api_router.include_router(invoices.router, prefix="/invoices", tags=["invoices"]
 api_router.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
 api_router.include_router(locations.router, prefix="/locations", tags=["locations"])
 api_router.include_router(categories.router, prefix="/categories", tags=["categories"])
+api_router.include_router(job_types.router, prefix="/job-types", tags=["job-types"])
 api_router.include_router(trades.router, prefix="/trades", tags=["trades"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
@@ -41,6 +43,4 @@ public_router.include_router(
     storefront.public_router, prefix="/storefront", tags=["storefront-public"]
 )
 # SC webhook receiver — authenticity is the HMAC signature, not a JWT.
-public_router.include_router(
-    webhooks.router, prefix="/webhooks", tags=["webhooks"]
-)
+public_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])

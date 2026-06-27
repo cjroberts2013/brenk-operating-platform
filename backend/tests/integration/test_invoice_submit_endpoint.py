@@ -48,9 +48,7 @@ async def harness(
     finally:
         app.dependency_overrides.pop(get_async_db, None)
         async with factory() as session:
-            await session.execute(
-                delete(WorkOrder).where(WorkOrder.sc_work_order_id >= TEST_WO_ID)
-            )
+            await session.execute(delete(WorkOrder).where(WorkOrder.sc_work_order_id >= TEST_WO_ID))
             await session.commit()
         await engine.dispose()
 
@@ -99,9 +97,7 @@ async def test_preview_reports_problems(harness) -> None:
     assert any("resolution" in p.lower() for p in body["problems"])
 
 
-async def test_submit_success_records_invoice(
-    harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_submit_success_records_invoice(harness, monkeypatch: pytest.MonkeyPatch) -> None:
     ac, factory = harness
     wo_id = await _make_wo(factory)
 
@@ -113,9 +109,7 @@ async def test_submit_success_records_invoice(
 
     monkeypatch.setattr(ServiceChannelClient, "create_invoice", fake_create_invoice)
 
-    resp = await ac.post(
-        f"/api/v1/work-orders/{wo_id}/submit-invoice", json={"invoice_text": None}
-    )
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/submit-invoice", json={"invoice_text": None})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["sc_invoice_id"] == 999000555
@@ -139,9 +133,7 @@ async def test_submit_success_records_invoice(
 
     # Persisted on the WO too.
     async with factory() as session:
-        wo = (
-            await session.execute(select(WorkOrder).where(WorkOrder.id == wo_id))
-        ).scalar_one()
+        wo = (await session.execute(select(WorkOrder).where(WorkOrder.id == wo_id))).scalar_one()
         assert wo.sc_invoice_id == 999000555
         assert wo.sc_invoice_status == "Open"
 
@@ -174,9 +166,7 @@ async def test_submit_sc_rejection_is_400_and_recorded(
 
     # Rejection reason persisted for the "last submit failed" surface.
     async with factory() as session:
-        wo = (
-            await session.execute(select(WorkOrder).where(WorkOrder.id == wo_id))
-        ).scalar_one()
+        wo = (await session.execute(select(WorkOrder).where(WorkOrder.id == wo_id))).scalar_one()
         assert wo.sc_invoice_last_error is not None
         assert "Invoice Number" in wo.sc_invoice_last_error
         assert wo.sc_invoice_id is None  # nothing recorded as created

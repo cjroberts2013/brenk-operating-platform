@@ -118,11 +118,11 @@ export default async function VendorDetailPage({
             value={formatMobileApp(vendor.mobile_app_capable)}
           />
           <Field
-            label="Trades"
+            label="Skills"
             value={
-              vendor.trade_specializations.length === 0
+              vendor.skills.length === 0
                 ? null
-                : vendor.trade_specializations.map((t) => t.name).join(', ')
+                : vendor.skills.map((t) => t.name).join(', ')
             }
           />
         </dl>

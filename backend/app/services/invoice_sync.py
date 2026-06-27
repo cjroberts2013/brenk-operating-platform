@@ -125,13 +125,17 @@ async def process_pending_events(
     """Process all pending webhook events (oldest first). Each is handled
     in its own transaction so one poison event can't block the rest."""
     ids = (
-        await db.execute(
-            select(WebhookEvent.id)
-            .where(WebhookEvent.status == "pending")
-            .order_by(WebhookEvent.id)
-            .limit(limit)
+        (
+            await db.execute(
+                select(WebhookEvent.id)
+                .where(WebhookEvent.status == "pending")
+                .order_by(WebhookEvent.id)
+                .limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     counts = {"processed": 0, "dead_letter": 0, "skipped": 0}
     for event_id in ids:
         result = await process_event(db, event_id, sc_env=sc_env)
@@ -220,9 +224,7 @@ async def _apply_invoice_event(
     invoice_number: str,
 ) -> None:
     sc_invoice_id = _as_int(obj.get("Id"))
-    wo_tracking = _as_int(
-        _first(obj, "WoTrackingNumber", "TrackingNumber", "WorkOrderId")
-    )
+    wo_tracking = _as_int(_first(obj, "WoTrackingNumber", "TrackingNumber", "WorkOrderId"))
     ev_time = _parse_dt(_first(obj, "UpdatedDateDTO", "UpdatedDate")) or _parse_dt(
         _first(obj, "LastActionDateDTO", "LastActionDate")
     )
@@ -254,9 +256,7 @@ async def _apply_invoice_event(
 
     is_new = invoice is None
     if is_new:
-        invoice = Invoice(
-            sc_env=sc_env, invoice_number=invoice_number, source="webhook"
-        )
+        invoice = Invoice(sc_env=sc_env, invoice_number=invoice_number, source="webhook")
         db.add(invoice)
 
     # Out-of-order guard: a stale (late) event must not regress newer state.
@@ -292,9 +292,7 @@ async def _apply_invoice_event(
             "posted_date": _parse_dt(_first(obj, "PostedDateDTO", "PostedDate")),
             "approved_date": _parse_dt(_first(obj, "ApprovedDateDTO", "ApprovedDate")),
             "paid_date": _parse_dt(_first(obj, "PaidDateDTO", "PaidDate")),
-            "last_action_date": _parse_dt(
-                _first(obj, "LastActionDateDTO", "LastActionDate")
-            ),
+            "last_action_date": _parse_dt(_first(obj, "LastActionDateDTO", "LastActionDate")),
         }
         for col, val in scalars.items():
             if val is not None:
@@ -309,8 +307,16 @@ async def _apply_invoice_event(
             await _replace_line_items(db, sc_env, sc_invoice_id, obj)
 
         await _sync_work_order(
-            db, sc_env, event_type, obj, wo_tracking, sc_invoice_id,
-            invoice_number, status, invoice.invoice_total, ev_time,
+            db,
+            sc_env,
+            event_type,
+            obj,
+            wo_tracking,
+            sc_invoice_id,
+            invoice_number,
+            status,
+            invoice.invoice_total,
+            ev_time,
         )
 
     # Status history: always append (even for stale/late events) for audit.
@@ -396,9 +402,7 @@ async def _sync_work_order(
     if wo_tracking is None:
         return
     wo = (
-        await db.execute(
-            select(WorkOrder).where(WorkOrder.sc_work_order_id == wo_tracking)
-        )
+        await db.execute(select(WorkOrder).where(WorkOrder.sc_work_order_id == wo_tracking))
     ).scalar_one_or_none()
     if wo is None:
         return

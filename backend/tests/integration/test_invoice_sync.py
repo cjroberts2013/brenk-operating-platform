@@ -64,17 +64,11 @@ async def db() -> AsyncGenerator[AsyncSession]:
                 delete(InvoiceMaterial).where(InvoiceMaterial.sc_invoice_id >= TEST_FLOOR)
             )
             await session.execute(
-                delete(InvoiceStatusHistory).where(
-                    InvoiceStatusHistory.sc_invoice_id >= TEST_FLOOR
-                )
+                delete(InvoiceStatusHistory).where(InvoiceStatusHistory.sc_invoice_id >= TEST_FLOOR)
             )
             await session.execute(delete(Invoice).where(Invoice.sc_invoice_id >= TEST_FLOOR))
-            await session.execute(
-                delete(WebhookEvent).where(WebhookEvent.object_id >= TEST_FLOOR)
-            )
-            await session.execute(
-                delete(WorkOrder).where(WorkOrder.sc_work_order_id >= TEST_WO)
-            )
+            await session.execute(delete(WebhookEvent).where(WebhookEvent.object_id >= TEST_FLOOR))
+            await session.execute(delete(WorkOrder).where(WorkOrder.sc_work_order_id >= TEST_WO))
             await session.commit()
     await engine.dispose()
 
@@ -98,9 +92,7 @@ async def _store(session: AsyncSession, body: Any, *, object_id: int) -> int:
 
 async def _get_invoice(session: AsyncSession, sc_invoice_id: int) -> Invoice | None:
     return (
-        await session.execute(
-            select(Invoice).where(Invoice.sc_invoice_id == sc_invoice_id)
-        )
+        await session.execute(select(Invoice).where(Invoice.sc_invoice_id == sc_invoice_id))
     ).scalar_one_or_none()
 
 
@@ -124,20 +116,28 @@ async def test_invoice_created_materializes(db: AsyncSession) -> None:
     assert inv.source == "webhook"
     assert inv.invoice_total == 100
     labors = (
-        await db.execute(select(InvoiceLabor).where(InvoiceLabor.sc_invoice_id == 999000010))
-    ).scalars().all()
+        (await db.execute(select(InvoiceLabor).where(InvoiceLabor.sc_invoice_id == 999000010)))
+        .scalars()
+        .all()
+    )
     materials = (
-        await db.execute(
-            select(InvoiceMaterial).where(InvoiceMaterial.sc_invoice_id == 999000010)
-        )
-    ).scalars().all()
-    history = (
-        await db.execute(
-            select(InvoiceStatusHistory).where(
-                InvoiceStatusHistory.sc_invoice_id == 999000010
+        (
+            await db.execute(
+                select(InvoiceMaterial).where(InvoiceMaterial.sc_invoice_id == 999000010)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    history = (
+        (
+            await db.execute(
+                select(InvoiceStatusHistory).where(InvoiceStatusHistory.sc_invoice_id == 999000010)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(labors) == 1
     assert len(materials) == 1
     assert len(history) == 1
@@ -159,12 +159,14 @@ async def test_out_of_order_does_not_regress(db: AsyncSession) -> None:
     assert inv is not None
     assert inv.status == "Paid"  # the older Approved event did not regress it
     history = (
-        await db.execute(
-            select(InvoiceStatusHistory).where(
-                InvoiceStatusHistory.sc_invoice_id == 999000020
+        (
+            await db.execute(
+                select(InvoiceStatusHistory).where(InvoiceStatusHistory.sc_invoice_id == 999000020)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(history) == 2  # both transitions recorded
 
 
@@ -187,8 +189,10 @@ async def test_empty_arrays_do_not_wipe_line_items(db: AsyncSession) -> None:
     await process_event(db, await _store(db, paid, object_id=999000030), sc_env=ENV)
 
     labors = (
-        await db.execute(select(InvoiceLabor).where(InvoiceLabor.sc_invoice_id == 999000030))
-    ).scalars().all()
+        (await db.execute(select(InvoiceLabor).where(InvoiceLabor.sc_invoice_id == 999000030)))
+        .scalars()
+        .all()
+    )
     assert len(labors) == 1  # the empty array on the Paid event left them intact
 
 

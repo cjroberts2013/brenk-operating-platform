@@ -1,34 +1,43 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
-import { ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/20/solid'
+import {
+  ArrowLeftIcon,
+  ArrowTopRightOnSquareIcon,
+  ChevronRightIcon,
+} from '@heroicons/react/20/solid'
 
 import { AttachmentsSection } from '@/components/work-orders/AttachmentsSection'
 import { CategoryControl } from '@/components/work-orders/CategoryControl'
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
+import { MarkPaidControl } from '@/components/work-orders/MarkPaidControl'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
 import { MessageVendorCard } from '@/components/work-orders/MessageVendorCard'
-import { NextStepCard } from '@/components/work-orders/NextStepCard'
-import {
-  BILLING_STEP_KINDS,
-  deriveNextStep,
-} from '@/components/work-orders/next-step'
+import { NextStepAction } from '@/components/work-orders/NextStepAction'
+import { deriveNextStep } from '@/components/work-orders/next-step'
 import { ScInvoiceCard } from '@/components/work-orders/ScInvoiceCard'
 import { SubmitInvoiceButton } from '@/components/work-orders/SubmitInvoiceButton'
 import { VendorAssignmentControl } from '@/components/work-orders/VendorAssignmentControl'
 import { VendorNotifiedControl } from '@/components/work-orders/VendorNotifiedControl'
+import { VendorSuggestionPanel } from '@/components/work-orders/VendorSuggestionPanel'
 import { WorkflowChecklist } from '@/components/work-orders/WorkflowChecklist'
+import { WorkflowStepper } from '@/components/work-orders/WorkflowStepper'
 import { ApiError } from '@/lib/api/server'
 import { listVendors } from '@/lib/api/vendors'
 import {
   getVendorMessage,
+  getVendorSuggestions,
   getWorkOrder,
   listCategories,
   listWorkOrderAttachments,
   listWorkOrderNotes,
 } from '@/lib/api/work-orders'
-import type { VendorMessage, WorkOrderAttachment } from '@/lib/api/types'
+import type {
+  VendorMessage,
+  VendorSuggestionResponse,
+  WorkOrderAttachment,
+} from '@/lib/api/types'
 import { money, relativeTime, shortDate } from '@/lib/format'
 
 const SC_WEB_URL =
@@ -108,22 +117,86 @@ export default async function WorkOrderDetailPage({
     .filter(Boolean)
     .join(' — ')
 
-  // Markup helper is only relevant while the next step is a billing
-  // step (price it / invoice it / mark paid). Auto-expand it then; keep
-  // it collapsed on early-stage, canceled, and fully-paid WOs so it
-  // isn't clutter. Same derivation as the Next-step card.
+  // The next step drives which tool is hoisted into the action-first
+  // hero vs. left collapsed in the reference rail. Same derivation as
+  // the hero + workflow checklist.
   const nextStep = deriveNextStep(wo)
-  const markupOpen = BILLING_STEP_KINDS.has(nextStep.kind)
+  // The pricing steps (set markup / invoice) put the markup helper in the
+  // hero (expanded); every other step leaves it collapsed in the rail.
+  // The later "mark paid" step gets its own control, not the markup tool.
+  const markupInHero =
+    nextStep.kind === 'markup' || nextStep.kind === 'invoice'
+  // The notify step puts the vendor-message card in the hero; otherwise
+  // it sits in the rail as reference.
+  const notifyStep = nextStep.kind === 'notify'
   // Submit button appears exactly when the derived next step is "invoice
   // in SC": markup is set, the WO is invoice-eligible, and no active SC
   // invoice exists yet. The dialog re-validates server-side regardless.
   const canSubmitInvoice = nextStep.kind === 'invoice'
+
+  // Vendor suggestions — fetched only at the assign step (mirrors the
+  // conditional vendor-message fetch). Best-effort: a failure leaves the
+  // panel to fall back to the plain dropdown.
+  let vendorSuggestions: VendorSuggestionResponse | null = null
+  if (nextStep.kind === 'assign') {
+    try {
+      vendorSuggestions = await getVendorSuggestions(wo.id)
+    } catch {
+      vendorSuggestions = null
+    }
+  }
 
   // Full record for the assigned vendor (the WO only embeds id/name),
   // so the next-step card can show their preferred contact method.
   const assignedVendor = wo.assigned_vendor
     ? (activeVendors.items.find((v) => v.id === wo.assigned_vendor!.id) ?? null)
     : null
+
+  // Controls built once and placed either in the hero (current step) or
+  // the rail/checklist (reference). The vendor + notify controls also
+  // back the collapsible full checklist, so the operator can override any
+  // stage; React renders the same element in both spots independently.
+  const vendorControl = (
+    <VendorAssignmentControl
+      workOrderId={wo.id}
+      currentVendor={wo.assigned_vendor}
+      activeVendors={activeVendors.items}
+    />
+  )
+  // At the assign step the hero wraps the dropdown in the suggestion panel
+  // (top pick + runner-ups); elsewhere (and in the override checklist) the
+  // plain dropdown is used.
+  const assignControl =
+    nextStep.kind === 'assign' ? (
+      <VendorSuggestionPanel
+        workOrderId={wo.id}
+        suggestions={vendorSuggestions}
+        dropdown={vendorControl}
+      />
+    ) : (
+      vendorControl
+    )
+  const notifyControl = (
+    <VendorNotifiedControl
+      workOrderId={wo.id}
+      notifiedAt={wo.brenk_vendor_notified_at}
+      hasVendor={wo.assigned_vendor !== null}
+    />
+  )
+  const messageCard = vendorMessage ? (
+    <MessageVendorCard
+      workOrderId={wo.id}
+      message={vendorMessage}
+      attachments={attachments}
+    />
+  ) : null
+  const markupHelper = <MarkupHelper wo={wo} defaultOpen={markupInHero} />
+  const submitButton = canSubmitInvoice ? (
+    <SubmitInvoiceButton workOrderId={wo.id} />
+  ) : null
+  const paidControl = (
+    <MarkPaidControl workOrderId={wo.id} paidAt={wo.brenk_paid_at} />
+  )
 
   return (
     <div className="space-y-6">
@@ -161,12 +234,40 @@ export default async function WorkOrderDetailPage({
         </div>
       </header>
 
+      {/* Always-visible pipeline strip + collapsible full checklist for
+          overriding any stage. Replaces the tall vertical checklist. */}
+      <section className="rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
+        <div className="px-4 py-3">
+          <WorkflowStepper wo={wo} />
+        </div>
+        <details className="group border-t border-gray-200 dark:border-white/10">
+          <summary className="flex cursor-pointer list-none items-center gap-1 px-4 py-2 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 [&::-webkit-details-marker]:hidden">
+            <ChevronRightIcon className="size-3.5 transition-transform group-open:rotate-90" />
+            All stages &amp; overrides
+          </summary>
+          <div className="border-t border-gray-200 dark:border-white/10">
+            <WorkflowChecklist
+              wo={wo}
+              variant="bare"
+              vendorControl={vendorControl}
+              notifyControl={notifyControl}
+            />
+          </div>
+        </details>
+      </section>
+
       {/* The single most important thing on the page, full width at the
-          top: what to do next (with the action/contact inline). */}
-      <NextStepCard
+          top: what to do next AND the tool to do it. */}
+      <NextStepAction
         wo={wo}
         scWebUrl={SC_WEB_URL}
-        vendorContact={assignedVendor}
+        assignedVendor={assignedVendor}
+        vendorControl={assignControl}
+        notifyControl={notifyControl}
+        messageCard={notifyStep ? messageCard : null}
+        markupHelper={markupInHero ? markupHelper : null}
+        submitButton={submitButton}
+        paidControl={paidControl}
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -242,34 +343,10 @@ export default async function WorkOrderDetailPage({
           <NotesTimeline notes={notes} />
         </div>
 
-        {/* Right rail: workflow + markup + meta */}
+        {/* Right rail: reference cards. The active step's tool lives in
+            the hero above; this rail holds the category, the SC invoice
+            state, and whatever tool isn't currently in the hero. */}
         <div className="space-y-6">
-          <WorkflowChecklist
-            wo={wo}
-            vendorControl={
-              <VendorAssignmentControl
-                workOrderId={wo.id}
-                currentVendor={wo.assigned_vendor}
-                activeVendors={activeVendors.items}
-              />
-            }
-            notifyControl={
-              <VendorNotifiedControl
-                workOrderId={wo.id}
-                notifiedAt={wo.brenk_vendor_notified_at}
-                hasVendor={wo.assigned_vendor !== null}
-              />
-            }
-          />
-
-          {vendorMessage ? (
-            <MessageVendorCard
-              workOrderId={wo.id}
-              message={vendorMessage}
-              attachments={attachments}
-            />
-          ) : null}
-
           <CategoryControl
             workOrderId={wo.id}
             category={wo.brenk_category}
@@ -277,9 +354,13 @@ export default async function WorkOrderDetailPage({
             categories={categoryList.categories}
           />
 
-          <MarkupHelper wo={wo} defaultOpen={markupOpen} />
+          {/* Vendor message lives in the hero on the notify step; here as
+              reference at every other stage (so it stays reachable). */}
+          {messageCard && !notifyStep ? messageCard : null}
 
-          {canSubmitInvoice ? <SubmitInvoiceButton workOrderId={wo.id} /> : null}
+          {/* Markup helper lives (expanded) in the hero on the pricing
+              steps; here collapsed as reference at every other stage. */}
+          {!markupInHero ? markupHelper : null}
 
           <ScInvoiceCard wo={wo} scWebUrl={SC_WEB_URL} />
 

@@ -70,9 +70,7 @@ class WebhookEvent(Base):
     # sha256(raw_body) hex; ON CONFLICT DO NOTHING makes redelivery a no-op.
     dedupe_key: Mapped[str | None] = mapped_column(String(64), unique=True)
     # pending | processed | skipped_duplicate | dead_letter | invalid_signature
-    status: Mapped[str] = mapped_column(
-        String(30), nullable=False, server_default="pending"
-    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="pending")
     error: Mapped[str | None] = mapped_column(Text)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -140,9 +138,7 @@ class InvoiceLabor(Base):
     non-empty Labors array (empty arrays must not wipe existing lines)."""
 
     __tablename__ = "invoice_labors"
-    __table_args__ = (
-        Index("ix_invoice_labors_invoice", "sc_env", "sc_invoice_id"),
-    )
+    __table_args__ = (Index("ix_invoice_labors_invoice", "sc_env", "sc_invoice_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     sc_env: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -159,9 +155,7 @@ class InvoiceMaterial(Base):
     """Itemized material line. Same delete-and-replace rule as labors."""
 
     __tablename__ = "invoice_materials"
-    __table_args__ = (
-        Index("ix_invoice_materials_invoice", "sc_env", "sc_invoice_id"),
-    )
+    __table_args__ = (Index("ix_invoice_materials_invoice", "sc_env", "sc_invoice_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     sc_env: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -178,9 +172,7 @@ class InvoiceStatusHistory(Base):
     """Append-only audit trail of every invoice status transition."""
 
     __tablename__ = "invoice_status_history"
-    __table_args__ = (
-        Index("ix_invoice_status_history_invoice", "sc_env", "sc_invoice_id"),
-    )
+    __table_args__ = (Index("ix_invoice_status_history_invoice", "sc_env", "sc_invoice_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     sc_env: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -189,6 +181,4 @@ class InvoiceStatusHistory(Base):
     status: Mapped[str | None] = mapped_column(String(40))
     changed_by: Mapped[str | None] = mapped_column(String(200))
     event_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    webhook_event_id: Mapped[int | None] = mapped_column(
-        ForeignKey("webhook_events.id")
-    )
+    webhook_event_id: Mapped[int | None] = mapped_column(ForeignKey("webhook_events.id"))

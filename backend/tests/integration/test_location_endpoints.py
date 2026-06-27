@@ -183,9 +183,7 @@ async def test_detail_returns_related_wos_and_metrics(
     assert body["gate_codes_history"] == []
 
 
-async def test_work_orders_endpoint_paginates(
-    client: httpx.AsyncClient, seed: SeedFn
-) -> None:
+async def test_work_orders_endpoint_paginates(client: httpx.AsyncClient, seed: SeedFn) -> None:
     info = await seed(
         store_id="ZZZ-WOS",
         wo_statuses=("OPEN", "IN PROGRESS", "COMPLETED", "OPEN", "OPEN"),

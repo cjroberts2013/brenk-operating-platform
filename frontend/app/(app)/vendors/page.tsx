@@ -1,5 +1,5 @@
 import { VendorsTableWithActions } from '@/components/vendors/VendorsTableWithActions'
-import { listTrades } from '@/lib/api/trades'
+import { listJobTypes } from '@/lib/api/job-types'
 import { listVendors } from '@/lib/api/vendors'
 
 type SearchParams = Record<string, string | string[] | undefined>
@@ -31,14 +31,16 @@ export default async function VendorsPage({
   // Tracked in the URL so reloads + back/forward keep the same view.
   const effectiveFilter = is_active === undefined ? true : is_active
 
-  const [vendors, trades] = await Promise.all([
+  const [vendors, jobTypes] = await Promise.all([
     listVendors({
       page_size: 200,
       is_active: effectiveFilter,
       ...(q ? { q } : {}),
     }),
-    listTrades(),
+    listJobTypes(),
   ])
+  // Only active types are offered when tagging a vendor's skills.
+  const activeJobTypes = jobTypes.filter((t) => t.is_active && !t.is_catchall)
 
   return (
     <div className="space-y-6">
@@ -57,7 +59,10 @@ export default async function VendorsPage({
         <ActiveFilter current={is_active} />
       </header>
 
-      <VendorsTableWithActions vendors={vendors.items} trades={trades} />
+      <VendorsTableWithActions
+        vendors={vendors.items}
+        jobTypes={activeJobTypes}
+      />
     </div>
   )
 }

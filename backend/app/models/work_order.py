@@ -52,6 +52,35 @@ class Trade(Base, TimestampMixin):
         return f"<Trade {self.name}>"
 
 
+class JobType(Base, TimestampMixin):
+    """A Brenk job type — the single shared taxonomy used for BOTH AI
+    work-order categorization (`work_orders.brenk_category`) and vendor
+    skills (`vendor_job_types`).
+
+    Replaces the old hardcoded `app/services/categories.py` list so Daryl can
+    add/rename types from the dashboard as new trades arise. The `description`
+    guides the Gemini categorizer. Distinct from SC's `trade` (the often-wrong
+    skill SC puts on a WO) — this is Brenk's own clean vocabulary.
+    """
+
+    __tablename__ = "job_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    # One-line description guiding the categorizer's classification.
+    description: Mapped[str | None] = mapped_column(Text)
+    # Display order (lower first); ties broken by name.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Soft-retire: inactive types stay for history but drop out of pickers
+    # and the categorizer's choices.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # The catch-all ("Other") — kept last and never offered as a vendor skill.
+    is_catchall: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<JobType {self.name}>"
+
+
 # =============================================================================
 # Core business entities
 # =============================================================================
@@ -182,6 +211,22 @@ class VendorTrade(Base):
     )
 
 
+class VendorJobType(Base):
+    """Many-to-many junction between vendors and the job types (skills) they
+    do — the shared taxonomy that also drives AI categorization. Replaces the
+    old `vendor_trades` link as the source of vendor skills.
+    """
+
+    __tablename__ = "vendor_job_types"
+
+    vendor_id: Mapped[int] = mapped_column(
+        ForeignKey("vendors.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_type_id: Mapped[int] = mapped_column(
+        ForeignKey("job_types.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
 class Vendor(Base, TimestampMixin):
     """A sub-vendor that Brenk dispatches work to.
 
@@ -231,9 +276,16 @@ class Vendor(Base, TimestampMixin):
     """e.g. 'don't text after 6pm', 'responds slowly'."""
 
     work_orders: Mapped[list["WorkOrder"]] = relationship(back_populates="assigned_vendor")
+    # Vendor skills — the shared job-type taxonomy. Ordered by the taxonomy's
+    # own display order for stable response shapes.
+    job_types: Mapped[list["JobType"]] = relationship(
+        secondary="vendor_job_types",
+        order_by="JobType.position",
+    )
+    # Legacy SC-trade specializations — superseded by `job_types`. Kept so the
+    # one-time remap can read the old tags; no longer surfaced in the API.
     trade_specializations: Mapped[list["Trade"]] = relationship(
         secondary="vendor_trades",
-        # Order alphabetically for stable response shapes.
         order_by="Trade.name",
     )
 
@@ -355,9 +407,10 @@ class WorkOrder(Base, TimestampMixin):
     brenk_vendor_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Brenk job category (AI-inferred, then confirmed/overridden by the
-    # operator). Distinct from SC's `trade` and `category` — a curated job
-    # *type* (app/services/categories.py) used for profit metrics and markup
-    # suggestions. `brenk_category` is the effective value; `*_source` is
+    # operator). Distinct from SC's `trade` and `category` — a `JobType` name
+    # from the shared `job_types` taxonomy, used for profit metrics, markup
+    # suggestions, and vendor matching. `brenk_category` is the effective
+    # value; `*_source` is
     # 'ai' (unreviewed), 'confirmed' (operator agreed) or 'manual' (operator
     # changed it); `*_confidence` is the model's 0..1 score; `*_ai` preserves
     # the original AI guess even after a manual override (to measure accuracy).

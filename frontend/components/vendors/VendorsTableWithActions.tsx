@@ -9,17 +9,17 @@ import {
 } from '@heroicons/react/20/solid'
 
 import { deleteVendorAction } from '@/app/(app)/vendors/actions'
-import type { TradeRef, VendorSummary } from '@/lib/api/types'
+import type { JobType, VendorSummary } from '@/lib/api/types'
 
 import { SyncFromScButton } from './SyncFromScButton'
 import { VendorFormModal } from './VendorFormModal'
 
 export function VendorsTableWithActions({
   vendors,
-  trades,
+  jobTypes,
 }: {
   vendors: VendorSummary[]
-  trades: TradeRef[]
+  jobTypes: JobType[]
 }) {
   const [modal, setModal] = useState<{ open: boolean; vendor: VendorSummary | null }>(
     { open: false, vendor: null },
@@ -69,7 +69,7 @@ export function VendorsTableWithActions({
                   <Th>Contact</Th>
                   <Th>Payment terms</Th>
                   <Th>Service area</Th>
-                  <Th>Trades</Th>
+                  <Th>Skills</Th>
                   <Th align="right">Active WOs</Th>
                   <Th align="right">Actions</Th>
                 </tr>
@@ -103,11 +103,11 @@ export function VendorsTableWithActions({
                     <Td>{vendor.payment_terms ?? '—'}</Td>
                     <Td>{vendor.service_area ?? '—'}</Td>
                     <Td>
-                      {vendor.trade_specializations.length === 0 ? (
+                      {vendor.skills.length === 0 ? (
                         <span className="text-gray-400">—</span>
                       ) : (
                         <div className="flex flex-wrap gap-1">
-                          {vendor.trade_specializations.map((t) => (
+                          {vendor.skills.map((t) => (
                             <span
                               key={t.id}
                               className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-white/5 dark:text-gray-300"
@@ -145,7 +145,7 @@ export function VendorsTableWithActions({
         open={modal.open}
         onClose={close}
         vendor={modal.vendor}
-        trades={trades}
+        jobTypes={jobTypes}
       />
     </>
   )

@@ -29,7 +29,7 @@ def _transaction_pooler(url: str) -> str:
 sync_engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    echo=settings.DEBUG,
+    echo=settings.SQL_ECHO,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
@@ -47,7 +47,7 @@ async_engine = create_async_engine(
     # cache. BOTH are required — transaction pooling rotates the underlying
     # server connection, so a cached prepared statement may not exist on it.
     connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
-    echo=settings.DEBUG,
+    echo=settings.SQL_ECHO,
 )
 AsyncSessionLocal = async_sessionmaker(
     bind=async_engine,

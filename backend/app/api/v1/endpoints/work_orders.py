@@ -30,6 +30,7 @@ from app.models.work_order import (
     WorkOrder,
     WorkOrderNote,
 )
+from app.schemas.vendor import VendorSuggestionResponse
 from app.schemas.work_order import (
     InvoiceSubmitPreview,
     InvoiceSubmitRequest,
@@ -41,7 +42,6 @@ from app.schemas.work_order import (
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
-from app.services.categories import is_valid_category
 from app.services.email import is_valid_email, send_email
 from app.services.invoice_submit import (
     InvoiceSubmitError,
@@ -49,6 +49,7 @@ from app.services.invoice_submit import (
     count_prior_invoices,
     submit_invoice,
 )
+from app.services.job_types import is_valid_job_type
 from app.services.pipeline import (
     STAGE_BY_KEY,
     classify,
@@ -63,6 +64,8 @@ from app.services.vendor_message import (
     compose_vendor_message,
     text_to_html,
 )
+from app.services.vendor_suggestions import build_vendor_suggestions
+from app.services.workload import active_work_order_counts
 
 logger = structlog.get_logger(__name__)
 
@@ -489,6 +492,36 @@ async def get_work_order(
     return await _to_detail(db, wo)
 
 
+@router.get(
+    "/{work_order_id}/suggest-vendors",
+    response_model=VendorSuggestionResponse,
+)
+async def suggest_vendors(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> VendorSuggestionResponse:
+    """Rank active sub-vendors for this WO's assign step by trade, location,
+    and current workload. Deterministic, computed on demand (only the assign
+    step needs it). 404 if the WO doesn't exist.
+    """
+    wo = await _fetch_work_order(db, work_order_id)
+
+    vendors = list(
+        (
+            await db.execute(
+                select(Vendor)
+                .options(selectinload(Vendor.job_types))
+                .where(Vendor.is_active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    counts = await active_work_order_counts(db, [v.id for v in vendors])
+    return build_vendor_suggestions(wo, vendors, counts)
+
+
 # Minimum past jobs in a category before its average markup is trustworthy
 # enough to suggest; below this we fall back to the trade default.
 _MIN_CATEGORY_MARKUP_SAMPLES = 3
@@ -511,7 +544,9 @@ async def _markup_suggestion(db: AsyncSession, wo: WorkOrder) -> tuple[Decimal |
         ).one()
         avg_markup, sample_count = row
         if avg_markup is not None and sample_count >= _MIN_CATEGORY_MARKUP_SAMPLES:
-            label = f"avg of {sample_count} {wo.brenk_category} job{'s' if sample_count != 1 else ''}"
+            label = (
+                f"avg of {sample_count} {wo.brenk_category} job{'s' if sample_count != 1 else ''}"
+            )
             return Decimal(avg_markup).quantize(Decimal("0.1")), label
 
     if wo.trade is not None and wo.trade.default_markup_percent is not None:
@@ -702,7 +737,7 @@ async def update_work_order(
     # precedence; otherwise a "confirm" marks the current AI value accepted.
     if "brenk_category" in update_data:
         new_category = update_data["brenk_category"]
-        if new_category is not None and not is_valid_category(new_category):
+        if new_category is not None and not await is_valid_job_type(db, new_category):
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail=f"unknown category: {new_category}",

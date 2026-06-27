@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_async_db
-from app.models.work_order import Trade, Vendor, WorkOrder
+from app.models.work_order import JobType, Vendor
 from app.schemas.vendor import (
     VendorCreate,
     VendorDetail,
@@ -24,6 +24,7 @@ from app.schemas.vendor import (
     VendorUpdate,
 )
 from app.services.sync.vendors import sync_vendors_from_sc
+from app.services.workload import active_work_order_counts as _active_counts
 
 
 class VendorSyncSummary(BaseModel):
@@ -37,54 +38,29 @@ class VendorSyncSummary(BaseModel):
 
 router = APIRouter()
 
-_TERMINAL_STATUSES = ("COMPLETED", "CANCELLED")
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
 
 
-async def _active_counts(db: AsyncSession, vendor_ids: list[int]) -> dict[int, int]:
-    """Return {vendor_id: count of non-terminal work orders assigned}.
-
-    One grouped query for the whole batch — keeps the list endpoint
-    from issuing N+1 counts.
-    """
-    if not vendor_ids:
-        return {}
-    stmt = (
-        select(WorkOrder.assigned_vendor_id, func.count(WorkOrder.id))
-        .where(
-            WorkOrder.assigned_vendor_id.in_(vendor_ids),
-            WorkOrder.primary_status.notin_(_TERMINAL_STATUSES),
-        )
-        .group_by(WorkOrder.assigned_vendor_id)
-    )
-    rows = (await db.execute(stmt)).all()
-    return {row[0]: row[1] for row in rows if row[0] is not None}
-
-
-async def _load_trades(db: AsyncSession, trade_ids: list[int]) -> list[Trade]:
-    """Fetch the given Trade rows, raising 400 if any id is unknown."""
-    if not trade_ids:
+async def _load_job_types(db: AsyncSession, job_type_ids: list[int]) -> list[JobType]:
+    """Fetch the given JobType rows, raising 400 if any id is unknown."""
+    if not job_type_ids:
         return []
-    unique_ids = list({*trade_ids})
-    rows = (await db.execute(select(Trade).where(Trade.id.in_(unique_ids)))).scalars().all()
+    unique_ids = list({*job_type_ids})
+    rows = (await db.execute(select(JobType).where(JobType.id.in_(unique_ids)))).scalars().all()
     found_ids = {t.id for t in rows}
     missing = [tid for tid in unique_ids if tid not in found_ids]
     if missing:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=f"unknown trade_ids: {missing}",
+            detail=f"unknown job_type_ids: {missing}",
         )
     return list(rows)
 
 
 async def _fetch_vendor(db: AsyncSession, vendor_id: int) -> Vendor:
-    """Look up a vendor by id with trades eager-loaded, or raise 404."""
-    stmt = (
-        select(Vendor)
-        .options(selectinload(Vendor.trade_specializations))
-        .where(Vendor.id == vendor_id)
-    )
+    """Look up a vendor by id with skills eager-loaded, or raise 404."""
+    stmt = select(Vendor).options(selectinload(Vendor.job_types)).where(Vendor.id == vendor_id)
     vendor = (await db.execute(stmt)).scalar_one_or_none()
     if vendor is None:
         raise HTTPException(
@@ -110,7 +86,7 @@ def _to_detail(vendor: Vendor, active_count: int) -> VendorDetail:
         mobile_app_capable=vendor.mobile_app_capable,
         markup_notes=vendor.markup_notes,
         communication_notes=vendor.communication_notes,
-        trade_specializations=vendor.trade_specializations,  # type: ignore[arg-type]
+        skills=vendor.job_types,  # type: ignore[arg-type]
         active_work_orders=active_count,
         created_at=vendor.created_at,
         updated_at=vendor.updated_at,
@@ -118,22 +94,7 @@ def _to_detail(vendor: Vendor, active_count: int) -> VendorDetail:
 
 
 def _to_summary(vendor: Vendor, active_count: int) -> VendorSummary:
-    return VendorSummary(
-        id=vendor.id,
-        name=vendor.name,
-        phone=vendor.phone,
-        email=vendor.email,
-        notes=vendor.notes,
-        is_active=vendor.is_active,
-        contact_preference=vendor.contact_preference,
-        payment_terms=vendor.payment_terms,
-        service_area=vendor.service_area,
-        mobile_app_capable=vendor.mobile_app_capable,
-        markup_notes=vendor.markup_notes,
-        communication_notes=vendor.communication_notes,
-        trade_specializations=vendor.trade_specializations,  # type: ignore[arg-type]
-        active_work_orders=active_count,
-    )
+    return VendorSummary.from_vendor(vendor, active_count)
 
 
 # -----------------------------------------------------------------------------
@@ -162,16 +123,16 @@ async def list_vendors(
         bool | None,
         Query(description="Filter to active or inactive vendors"),
     ] = None,
-    trade_id: Annotated[
+    job_type_id: Annotated[
         int | None,
-        Query(description="Filter to vendors specializing in this trade"),
+        Query(description="Filter to vendors who do this job type (skill)"),
     ] = None,
     q: Annotated[
         str | None,
         Query(
             description=(
                 "Free-text search across name, phone, email, service area, "
-                "and trade name. Case-insensitive, substring match."
+                "and skill name. Case-insensitive, substring match."
             ),
         ),
     ] = None,
@@ -182,27 +143,23 @@ async def list_vendors(
     filters = []
     if is_active is not None:
         filters.append(Vendor.is_active.is_(is_active))
-    if trade_id is not None:
+    if job_type_id is not None:
         filters.append(
-            Vendor.id.in_(
-                select(Vendor.id).join(Vendor.trade_specializations).where(Trade.id == trade_id)
-            )
+            Vendor.id.in_(select(Vendor.id).join(Vendor.job_types).where(JobType.id == job_type_id))
         )
     if q is not None and q.strip():
         needle = f"%{q.strip()}%"
-        # Vendor.id IN (vendors who match by their own field OR by a
-        # specialized-trade name). Done as a subquery so the outer
-        # paginated query doesn't grow rows per trade-match.
-        trade_match_ids = (
-            select(Vendor.id).join(Vendor.trade_specializations).where(Trade.name.ilike(needle))
-        )
+        # Vendor.id IN (vendors who match by their own field OR by a skill
+        # name). Done as a subquery so the outer paginated query doesn't
+        # grow rows per skill-match.
+        skill_match_ids = select(Vendor.id).join(Vendor.job_types).where(JobType.name.ilike(needle))
         filters.append(
             or_(
                 Vendor.name.ilike(needle),
                 Vendor.phone.ilike(needle),
                 Vendor.email.ilike(needle),
                 Vendor.service_area.ilike(needle),
-                Vendor.id.in_(trade_match_ids),
+                Vendor.id.in_(skill_match_ids),
             )
         )
 
@@ -213,7 +170,7 @@ async def list_vendors(
 
     stmt = (
         select(Vendor)
-        .options(selectinload(Vendor.trade_specializations))
+        .options(selectinload(Vendor.job_types))
         .order_by(Vendor.name.asc(), Vendor.id.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -250,7 +207,7 @@ async def create_vendor(
     payload: VendorCreate,
     db: Annotated[AsyncSession, Depends(get_async_db)],
 ) -> VendorDetail:
-    trades = await _load_trades(db, payload.trade_ids)
+    job_types = await _load_job_types(db, payload.job_type_ids)
 
     vendor = Vendor(
         name=payload.name,
@@ -264,7 +221,7 @@ async def create_vendor(
         markup_notes=payload.markup_notes,
         communication_notes=payload.communication_notes,
     )
-    vendor.trade_specializations = trades
+    vendor.job_types = job_types
     db.add(vendor)
     await db.commit()
     # Re-fetch with eager-loaded relationships. Avoids the MissingGreenlet
@@ -283,13 +240,13 @@ async def update_vendor(
 
     # `exclude_unset=True` so PATCH only touches fields the client sent.
     update_data = payload.model_dump(exclude_unset=True)
-    trade_ids = update_data.pop("trade_ids", None)
+    job_type_ids = update_data.pop("job_type_ids", None)
 
     for field, value in update_data.items():
         setattr(vendor, field, value)
 
-    if trade_ids is not None:
-        vendor.trade_specializations = await _load_trades(db, trade_ids)
+    if job_type_ids is not None:
+        vendor.job_types = await _load_job_types(db, job_type_ids)
 
     await db.commit()
     fresh = await _fetch_vendor(db, vendor.id)

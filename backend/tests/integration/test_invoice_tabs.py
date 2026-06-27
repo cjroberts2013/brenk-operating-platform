@@ -29,12 +29,8 @@ CASES = {
         extended_status="CONFIRMED",
         brenk_markup_percent=Decimal("50"),
     ),
-    "sent": dict(
-        primary_status="COMPLETED", extended_status="CONFIRMED", sc_invoice_status="Open"
-    ),
-    "paid": dict(
-        primary_status="COMPLETED", extended_status="CONFIRMED", sc_invoice_status="Paid"
-    ),
+    "sent": dict(primary_status="COMPLETED", extended_status="CONFIRMED", sc_invoice_status="Open"),
+    "paid": dict(primary_status="COMPLETED", extended_status="CONFIRMED", sc_invoice_status="Paid"),
     "rejected": dict(
         primary_status="COMPLETED",
         extended_status="CONFIRMED",
@@ -84,9 +80,7 @@ async def env(
 
 
 async def _tab(client: httpx.AsyncClient, tab: str) -> set[str]:
-    r = await client.get(
-        "/api/v1/work-orders/", params={"invoice_tab": tab, "page_size": 200}
-    )
+    r = await client.get("/api/v1/work-orders/", params={"invoice_tab": tab, "page_size": 200})
     assert r.status_code == 200
     return {it["sc_number"] for it in r.json()["items"]}
 
@@ -95,8 +89,10 @@ async def test_each_wo_lands_in_exactly_one_tab(
     env: tuple[httpx.AsyncClient, dict[str, str]],
 ) -> None:
     client, num = env
-    tabs = {t: await _tab(client, t) for t in
-            ("ready_to_markup", "marked_up", "sent", "rejected", "paid")}
+    tabs = {
+        t: await _tab(client, t)
+        for t in ("ready_to_markup", "marked_up", "sent", "rejected", "paid")
+    }
 
     # Expected tab per case.
     expected = {
@@ -106,7 +102,7 @@ async def test_each_wo_lands_in_exactly_one_tab(
         "paid": "paid",
         "rejected": "rejected",
         "voided": "ready_to_markup",  # void -> back to needs-invoicing
-        "legacy": "sent",             # primary_status=INVOICED fallback
+        "legacy": "sent",  # primary_status=INVOICED fallback
     }
     for case, tab in expected.items():
         n = num[case]
@@ -121,9 +117,7 @@ async def test_sent_summary_exposes_invoice_fields(
     env: tuple[httpx.AsyncClient, dict[str, str]],
 ) -> None:
     client, num = env
-    r = await client.get(
-        "/api/v1/work-orders/", params={"invoice_tab": "sent", "page_size": 200}
-    )
+    r = await client.get("/api/v1/work-orders/", params={"invoice_tab": "sent", "page_size": 200})
     row = next(it for it in r.json()["items"] if it["sc_number"] == num["sent"])
     assert row["sc_invoice_status"] == "Open"
     assert "sc_invoice_number" in row and "sc_invoice_total" in row

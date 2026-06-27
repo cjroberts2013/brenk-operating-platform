@@ -111,5 +111,6 @@ async def test_pagination(client: httpx.AsyncClient) -> None:
     assert p1["total"] == 4 and p2["total"] == 4
     assert len(p1["items"]) == 2 and len(p2["items"]) == 2
     # No overlap between pages.
-    assert not ({i["invoice_number"] for i in p1["items"]} &
-                {i["invoice_number"] for i in p2["items"]})
+    assert not (
+        {i["invoice_number"] for i in p1["items"]} & {i["invoice_number"] for i in p2["items"]}
+    )
