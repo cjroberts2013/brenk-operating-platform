@@ -34,6 +34,15 @@ export type VendorRef = {
   name: string
 }
 
+export type AssignedVendor = {
+  vendor: VendorRef
+  job_type: JobType | null
+  notified_at: string | null
+  labor_cost: string | null
+  material_cost: string | null
+  paid_to_vendor_at: string | null
+}
+
 export type WorkOrderSummary = {
   id: number
   sc_work_order_id: number
@@ -45,6 +54,7 @@ export type WorkOrderSummary = {
   location: LocationRef | null
   client: ClientRef | null
   assigned_vendor: VendorRef | null
+  vendor_assignments: AssignedVendor[]
   nte: string | null // serialized as a decimal string by FastAPI
   scheduled_date: string | null // ISO 8601
   sc_updated_date: string | null // ISO 8601
@@ -141,6 +151,7 @@ export type WorkOrderDetail = {
   location: LocationRef | null
   trade: TradeRef | null
   assigned_vendor: VendorRef | null
+  vendor_assignments: AssignedVendor[]
 
   primary_status: string
   extended_status: string | null
@@ -620,6 +631,22 @@ export type ReportsSummary = {
   vendor_spend: VendorSpend[]
   category_overview: CategoryOverview[]
   coverage: ReportsCoverage | null
+}
+
+export type VendorPayable = {
+  work_order_id: number
+  sc_number: string
+  vendor_id: number
+  vendor_name: string
+  location: string | null
+  payout: string
+  client_paid: boolean
+}
+
+export type PayablesResponse = {
+  items: VendorPayable[]
+  total_outstanding: string
+  total_client_paid: string
 }
 
 // =============================================================================

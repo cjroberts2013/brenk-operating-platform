@@ -22,8 +22,14 @@ from sqlalchemy.orm import joinedload
 
 from app.db.session import get_async_db
 from app.models.invoice import Invoice
-from app.models.work_order import WorkOrder
-from app.schemas.reports import CategoryOverview, ReportsCoverage, ReportsSummary
+from app.models.work_order import Location, Vendor, WorkOrder, WoVendorAssignment
+from app.schemas.reports import (
+    CategoryOverview,
+    PayablesResponse,
+    ReportsCoverage,
+    ReportsSummary,
+    VendorPayable,
+)
 from app.services.reports import build_reports_summary
 
 router = APIRouter()
@@ -126,3 +132,58 @@ async def get_reports_summary(
     summary.coverage = ReportsCoverage(invoiced_jobs=invoiced_jobs, priced_jobs=priced_jobs)
 
     return summary
+
+
+@router.get("/payables", response_model=PayablesResponse)
+async def get_payables(
+    session: Annotated[AsyncSession, Depends(get_async_db)],
+) -> PayablesResponse:
+    """Outstanding sub-vendor payouts — what Brenk still owes, with the
+    client-already-paid cases flagged (and surfaced first)."""
+    rows = (
+        await session.execute(
+            select(WoVendorAssignment, WorkOrder, Vendor, Location)
+            .join(WorkOrder, WorkOrder.id == WoVendorAssignment.work_order_id)
+            .join(Vendor, Vendor.id == WoVendorAssignment.vendor_id)
+            .outerjoin(Location, Location.id == WorkOrder.location_id)
+            .where(
+                WoVendorAssignment.paid_to_vendor_at.is_(None),
+                or_(
+                    WoVendorAssignment.labor_cost.is_not(None),
+                    WoVendorAssignment.material_cost.is_not(None),
+                ),
+            )
+        )
+    ).all()
+
+    items: list[VendorPayable] = []
+    total = Decimal(0)
+    total_client_paid = Decimal(0)
+    for assignment, wo, vendor, location in rows:
+        payout = (assignment.labor_cost or Decimal(0)) + (assignment.material_cost or Decimal(0))
+        if payout <= 0:
+            continue
+        client_paid = wo.brenk_paid_at is not None
+        total += payout
+        if client_paid:
+            total_client_paid += payout
+        items.append(
+            VendorPayable(
+                work_order_id=wo.id,
+                sc_number=wo.sc_number,
+                vendor_id=vendor.id,
+                vendor_name=vendor.name,
+                location=location.name if location else None,
+                payout=_money(payout),
+                client_paid=client_paid,
+            )
+        )
+
+    # Urgent (client already paid) first, then largest payout.
+    items.sort(key=lambda i: (i.client_paid, Decimal(i.payout)), reverse=True)
+
+    return PayablesResponse(
+        items=items,
+        total_outstanding=_money(total),
+        total_client_paid=_money(total_client_paid),
+    )

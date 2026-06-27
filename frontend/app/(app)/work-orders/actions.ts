@@ -5,76 +5,69 @@ import { revalidatePath } from 'next/cache'
 import { ApiError } from '@/lib/api/server'
 import { patchWorkOrder } from '@/lib/api/vendors'
 import {
+  addAssignment,
+  removeAssignment,
   sendVendorEmail,
   syncWorkOrdersFromSc,
+  updateAssignment,
   type VendorEmailResult,
 } from '@/lib/api/work-orders'
 import type { WorkOrderSyncSummary } from '@/lib/api/types'
 
-export type AssignVendorState = {
-  error: string | null
-  attempt: number
-}
-
-export async function assignVendorAction(
-  prev: AssignVendorState,
-  formData: FormData,
-): Promise<AssignVendorState> {
-  const attempt = prev.attempt + 1
-
-  const workOrderId = Number(formData.get('work_order_id'))
-  if (!Number.isFinite(workOrderId) || workOrderId < 1) {
-    return { error: 'invalid work order id', attempt }
-  }
-
-  const raw = formData.get('assigned_vendor_id')
-  let assigned_vendor_id: number | null
-  if (raw === null || raw === '') {
-    assigned_vendor_id = null
-  } else {
-    const n = Number(raw)
-    if (!Number.isFinite(n) || n < 1) {
-      return { error: 'invalid vendor selection', attempt }
-    }
-    assigned_vendor_id = n
-  }
-
-  try {
-    await patchWorkOrder(workOrderId, { assigned_vendor_id })
-  } catch (err) {
-    if (err instanceof ApiError) return { error: err.detail, attempt }
-    throw err
-  }
-
-  // Both the WO detail page and any vendor's detail page may now show
-  // different data — revalidate broadly.
-  revalidatePath('/work-orders')
-  revalidatePath('/vendors')
-  return { error: null, attempt }
-}
 
 
-/** One-click assign for the suggestion panel. Imperative (vendor id passed
- *  directly) rather than the FormData/useActionState shape of
- *  `assignVendorAction`, since the suggested vendor is known up front. */
-export async function quickAssignVendorAction(
+/** Add a vendor to a WO's assignment set (multi-vendor). Used by the
+ *  suggestion panel and the assignment control's "Add vendor". */
+export async function addAssignmentAction(
   workOrderId: number,
   vendorId: number,
+  jobTypeId?: number | null,
 ): Promise<{ error?: string }> {
-  if (!Number.isFinite(workOrderId) || workOrderId < 1) {
-    return { error: 'invalid work order id' }
-  }
   if (!Number.isFinite(vendorId) || vendorId < 1) {
     return { error: 'invalid vendor selection' }
   }
   try {
-    await patchWorkOrder(workOrderId, { assigned_vendor_id: vendorId })
+    await addAssignment(workOrderId, { vendor_id: vendorId, job_type_id: jobTypeId })
   } catch (err) {
     if (err instanceof ApiError) return { error: err.detail }
     throw err
   }
   revalidatePath('/work-orders')
   revalidatePath('/vendors')
+  return {}
+}
+
+/** Remove a vendor from a WO's assignment set. */
+export async function removeAssignmentAction(
+  workOrderId: number,
+  vendorId: number,
+): Promise<{ error?: string }> {
+  try {
+    await removeAssignment(workOrderId, vendorId)
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath('/work-orders')
+  revalidatePath('/vendors')
+  return {}
+}
+
+/** Mark one assigned vendor notified (or clear it). */
+export async function setAssignmentNotifiedAction(
+  workOrderId: number,
+  vendorId: number,
+  notified: boolean,
+): Promise<{ error?: string }> {
+  try {
+    await updateAssignment(workOrderId, vendorId, {
+      notified: notified ? 'now' : 'clear',
+    })
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath('/work-orders')
   return {}
 }
 

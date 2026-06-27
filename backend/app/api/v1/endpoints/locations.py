@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_async_db
-from app.models.work_order import GateCode, Location, WorkOrder
+from app.models.work_order import GateCode, Location, WorkOrder, WoVendorAssignment
 from app.schemas.location import (
     GateCodeCreate,
     GateCodeRead,
@@ -238,6 +238,10 @@ async def list_location_work_orders(
             selectinload(WorkOrder.location),
             selectinload(WorkOrder.trade),
             selectinload(WorkOrder.assigned_vendor),
+            selectinload(WorkOrder.vendor_assignments).options(
+                selectinload(WoVendorAssignment.vendor),
+                selectinload(WoVendorAssignment.job_type),
+            ),
         )
         .where(WorkOrder.location_id == location_id)
         .order_by(WorkOrder.sc_updated_date.desc().nullslast(), WorkOrder.id.desc())

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { CheckIcon, SparklesIcon } from '@heroicons/react/20/solid'
 
-import { quickAssignVendorAction } from '@/app/(app)/work-orders/actions'
+import { addAssignmentAction } from '@/app/(app)/work-orders/actions'
 import type { VendorSuggestion, VendorSuggestionResponse } from '@/lib/api/types'
 
 /**
@@ -35,7 +35,7 @@ export function VendorSuggestionPanel({
     setError(null)
     setAssigningId(vendorId)
     startTransition(async () => {
-      const res = await quickAssignVendorAction(workOrderId, vendorId)
+      const res = await addAssignmentAction(workOrderId, vendorId)
       if (res.error) {
         setError(res.error)
         setAssigningId(null)

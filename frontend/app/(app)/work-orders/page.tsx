@@ -240,12 +240,22 @@ export default async function WorkOrdersPage({
                     <Td>{wo.trade?.name ?? '—'}</Td>
                     <Td>
                       {wo.assigned_vendor ? (
-                        <Link
-                          href={`/vendors/${wo.assigned_vendor.id}`}
-                          className="text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-indigo-400"
-                        >
-                          {wo.assigned_vendor.name}
-                        </Link>
+                        <span className="inline-flex items-center gap-1">
+                          <Link
+                            href={`/vendors/${wo.assigned_vendor.id}`}
+                            className="text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-indigo-400"
+                          >
+                            {wo.assigned_vendor.name}
+                          </Link>
+                          {wo.vendor_assignments.length > 1 ? (
+                            <span
+                              className="rounded-sm bg-gray-100 px-1 text-[10px] font-medium text-gray-500 dark:bg-white/10 dark:text-gray-400"
+                              title={`${wo.vendor_assignments.length} vendors assigned`}
+                            >
+                              +{wo.vendor_assignments.length - 1}
+                            </span>
+                          ) : null}
+                        </span>
                       ) : vendorExpected(wo) ? (
                         <span className="text-xs font-medium text-red-600 dark:text-red-400">
                           Unassigned

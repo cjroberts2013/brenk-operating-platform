@@ -6,9 +6,30 @@ import { ApiError } from '@/lib/api/server'
 import {
   getInvoicePreview,
   submitInvoice,
+  updateAssignment,
+  updatePricing,
   updateWorkOrder,
 } from '@/lib/api/work-orders'
 import type { InvoiceSubmitPreview, WorkOrderUpdate } from '@/lib/api/types'
+
+/** Parse a money/percent string. '' → null (clear), undefined → null. */
+function parseMoney(
+  raw: string | undefined,
+  label: string,
+  max?: number,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, value: null }
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return { ok: true, value: null }
+  const n = Number(trimmed)
+  if (!Number.isFinite(n) || n < 0) {
+    return { ok: false, error: `${label} must be a non-negative number.` }
+  }
+  if (max !== undefined && n > max) {
+    return { ok: false, error: `${label} must be ${max} or less.` }
+  }
+  return { ok: true, value: trimmed }
+}
 
 export type MarkupActionResult = { error: string | null }
 
@@ -130,6 +151,82 @@ export async function saveInvoiceAction(
   revalidatePath(`/work-orders/${workOrderId}`)
   revalidatePath('/invoices')
   revalidatePath('/')
+  return { error: null }
+}
+
+export type PricingInput = {
+  /** One entry per assigned vendor; '' clears that vendor's cost. */
+  costs: { vendor_id: number; labor_cost: string; material_cost: string }[]
+  /** '' clears, undefined leaves alone. */
+  markup_percent?: string
+  /** '' clears, undefined leaves alone. */
+  total_override?: string
+}
+
+/** Save the itemized pricing — each vendor's payout + the WO markup/total —
+ *  in one atomic call. Per-vendor payouts are Brenk-confidential. */
+export async function savePricingAction(
+  workOrderId: number,
+  input: PricingInput,
+): Promise<MarkupActionResult> {
+  const costs: {
+    vendor_id: number
+    labor_cost: string | null
+    material_cost: string | null
+  }[] = []
+  for (const c of input.costs) {
+    const labor = parseMoney(c.labor_cost, 'Labor cost')
+    if (!labor.ok) return { error: labor.error }
+    const material = parseMoney(c.material_cost, 'Material cost')
+    if (!material.ok) return { error: material.error }
+    costs.push({
+      vendor_id: c.vendor_id,
+      labor_cost: labor.value,
+      material_cost: material.value,
+    })
+  }
+
+  const body: Parameters<typeof updatePricing>[1] = { costs }
+  if (input.markup_percent !== undefined) {
+    const r = parseMoney(input.markup_percent, 'Markup', 1000)
+    if (!r.ok) return { error: r.error }
+    body.brenk_markup_percent = r.value
+    body.set_markup = true
+  }
+  if (input.total_override !== undefined) {
+    const r = parseMoney(input.total_override, 'Total bill')
+    if (!r.ok) return { error: r.error }
+    body.brenk_total_override = r.value
+    body.set_total = true
+  }
+
+  try {
+    await updatePricing(workOrderId, body)
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath(`/work-orders/${workOrderId}`)
+  revalidatePath('/invoices')
+  revalidatePath('/reports')
+  revalidatePath('/')
+  return { error: null }
+}
+
+/** Mark Brenk's payment to one sub-vendor (or clear it). */
+export async function setVendorPaidAction(
+  workOrderId: number,
+  vendorId: number,
+  mark: boolean,
+): Promise<MarkupActionResult> {
+  try {
+    await updateAssignment(workOrderId, vendorId, { paid: mark ? 'now' : 'clear' })
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath(`/work-orders/${workOrderId}`)
+  revalidatePath('/reports')
   return { error: null }
 }
 

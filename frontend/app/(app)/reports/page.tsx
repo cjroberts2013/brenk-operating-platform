@@ -1,7 +1,8 @@
 import Link from 'next/link'
 
 import { BarChart, type BarDatum } from '@/components/reports/BarChart'
-import { getReportsSummary } from '@/lib/api/reports'
+import { PayablesSection } from '@/components/reports/PayablesSection'
+import { getPayables, getReportsSummary } from '@/lib/api/reports'
 import type { CategoryOverview, MarkupByTrade } from '@/lib/api/types'
 
 function usd(value: string): string {
@@ -23,7 +24,7 @@ function pct(value: number | null): string {
 }
 
 export default async function ReportsPage() {
-  const data = await getReportsSummary()
+  const [data, payables] = await Promise.all([getReportsSummary(), getPayables()])
   const {
     totals,
     markup_by_trade,
@@ -92,6 +93,9 @@ export default async function ReportsPage() {
           </p>
         </div>
       ) : null}
+
+      {/* ====== SUB-VENDOR PAYABLES ====== */}
+      <PayablesSection payables={payables} />
 
       {/* ====== CATEGORY OVERVIEW (populated now) ====== */}
       <section className="space-y-4">

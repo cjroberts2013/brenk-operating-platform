@@ -1,110 +1,131 @@
 'use client'
 
-import { useActionState, useEffect, useRef, useState } from 'react'
+import { useState, useTransition } from 'react'
 import Link from 'next/link'
-import { PencilSquareIcon } from '@heroicons/react/20/solid'
+import { useRouter } from 'next/navigation'
+import { PlusIcon, XMarkIcon } from '@heroicons/react/20/solid'
 
 import {
-  assignVendorAction,
-  type AssignVendorState,
+  addAssignmentAction,
+  removeAssignmentAction,
 } from '@/app/(app)/work-orders/actions'
-import type { VendorRef, VendorSummary } from '@/lib/api/types'
+import type { AssignedVendor, VendorSummary } from '@/lib/api/types'
 
-const INITIAL_STATE: AssignVendorState = { error: null, attempt: 0 }
-
+/**
+ * Multi-vendor assignment control. Shows the assigned sub-vendors as chips
+ * (each removable) plus an "Add vendor" picker, so a job can be split across
+ * several vendors. The first chip is the "primary" the single-vendor readers
+ * still key off.
+ */
 export function VendorAssignmentControl({
   workOrderId,
-  currentVendor,
+  assignments,
   activeVendors,
 }: {
   workOrderId: number
-  currentVendor: VendorRef | null
+  assignments: AssignedVendor[]
   activeVendors: VendorSummary[]
 }) {
-  const [editing, setEditing] = useState(false)
-  const [state, formAction, pending] = useActionState<AssignVendorState, FormData>(
-    assignVendorAction,
-    INITIAL_STATE,
-  )
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
 
-  // Auto-flip out of edit mode when an attempt succeeds (error === null).
-  // Same ref-based "new attempt only" trick we use in the vendor modal so
-  // the initial mount with attempt=0 doesn't auto-collapse.
-  const lastObservedAttempt = useRef(0)
-  useEffect(() => {
-    if (
-      state.attempt > lastObservedAttempt.current &&
-      state.error === null &&
-      !pending
-    ) {
-      lastObservedAttempt.current = state.attempt
-      setEditing(false)
-    }
-  }, [state.attempt, state.error, pending])
+  const assignedIds = new Set(assignments.map((a) => a.vendor.id))
+  const available = activeVendors.filter((v) => !assignedIds.has(v.id))
 
-  if (!editing) {
-    return (
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        {currentVendor ? (
-          <Link
-            href={`/vendors/${currentVendor.id}`}
-            className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
-          >
-            {currentVendor.name}
-          </Link>
-        ) : (
-          <span className="italic text-gray-500 dark:text-gray-400">
-            Unassigned
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200"
-        >
-          <PencilSquareIcon className="size-3" />
-          {currentVendor ? 'Change' : 'Assign'}
-        </button>
-      </div>
-    )
+  function run(fn: () => Promise<{ error?: string }>) {
+    setError(null)
+    startTransition(async () => {
+      const res = await fn()
+      if (res.error) setError(res.error)
+      else router.refresh()
+    })
   }
 
   return (
-    <form action={formAction} className="space-y-2">
-      <input type="hidden" name="work_order_id" value={workOrderId} />
-      <select
-        name="assigned_vendor_id"
-        defaultValue={currentVendor?.id ?? ''}
-        disabled={pending}
-        className="block w-full max-w-xs rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 dark:border-white/10 dark:bg-gray-800 dark:text-white"
-      >
-        <option value="">— Unassigned —</option>
-        {activeVendors.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.name}
-          </option>
-        ))}
-      </select>
-      {state.error ? (
-        <p className="text-xs text-red-600 dark:text-red-400">{state.error}</p>
-      ) : null}
-      <div className="flex items-center gap-2">
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-indigo-500 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-400 disabled:opacity-60"
-        >
-          {pending ? 'Saving…' : 'Save'}
-        </button>
+    <div className="space-y-2">
+      {assignments.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {assignments.map((a) => (
+            <li
+              key={a.vendor.id}
+              className="inline-flex items-center gap-1 rounded-full bg-gray-100 py-0.5 pl-2.5 pr-1 text-xs dark:bg-white/10"
+            >
+              <Link
+                href={`/vendors/${a.vendor.id}`}
+                className="font-medium text-gray-800 hover:text-indigo-600 dark:text-gray-100 dark:hover:text-indigo-300"
+              >
+                {a.vendor.name}
+              </Link>
+              {a.job_type ? (
+                <span className="text-gray-400">· {a.job_type.name}</span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => run(() => removeAssignmentAction(workOrderId, a.vendor.id))}
+                disabled={pending}
+                title={`Remove ${a.vendor.name}`}
+                className="rounded-full p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
+              >
+                <span className="sr-only">Remove</span>
+                <XMarkIcon className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span className="text-sm italic text-gray-500 dark:text-gray-400">
+          Unassigned
+        </span>
+      )}
+
+      {adding ? (
+        <div className="flex items-center gap-2">
+          <select
+            defaultValue=""
+            disabled={pending}
+            onChange={(e) => {
+              const id = Number(e.target.value)
+              if (id > 0) {
+                run(() => addAssignmentAction(workOrderId, id))
+                setAdding(false)
+              }
+            }}
+            className="block w-full max-w-xs rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 dark:border-white/10 dark:bg-gray-800 dark:text-white"
+          >
+            <option value="" disabled>
+              — Pick a vendor —
+            </option>
+            {available.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setAdding(false)}
+            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
         <button
           type="button"
-          onClick={() => setEditing(false)}
-          disabled={pending}
-          className="rounded-md px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"
+          onClick={() => setAdding(true)}
+          disabled={pending || available.length === 0}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 dark:text-indigo-400 dark:hover:bg-indigo-500/10"
         >
-          Cancel
+          <PlusIcon className="size-3.5" />
+          {assignments.length === 0 ? 'Assign vendor' : 'Add vendor'}
         </button>
-      </div>
-    </form>
+      )}
+
+      {error ? (
+        <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+      ) : null}
+    </div>
   )
 }

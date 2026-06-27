@@ -159,7 +159,7 @@ export default async function WorkOrderDetailPage({
   const vendorControl = (
     <VendorAssignmentControl
       workOrderId={wo.id}
-      currentVendor={wo.assigned_vendor}
+      assignments={wo.vendor_assignments}
       activeVendors={activeVendors.items}
     />
   )
@@ -179,8 +179,7 @@ export default async function WorkOrderDetailPage({
   const notifyControl = (
     <VendorNotifiedControl
       workOrderId={wo.id}
-      notifiedAt={wo.brenk_vendor_notified_at}
-      hasVendor={wo.assigned_vendor !== null}
+      assignments={wo.vendor_assignments}
     />
   )
   const messageCard = vendorMessage ? (

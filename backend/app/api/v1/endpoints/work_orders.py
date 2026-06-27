@@ -25,10 +25,12 @@ from app.models.invoice import Invoice
 from app.models.work_order import (
     Client,
     GateCode,
+    JobType,
     Location,
     Vendor,
     WorkOrder,
     WorkOrderNote,
+    WoVendorAssignment,
 )
 from app.schemas.vendor import VendorSuggestionResponse
 from app.schemas.work_order import (
@@ -250,7 +252,15 @@ async def list_work_orders(
     if trade_id is not None:
         filters.append(WorkOrder.trade_id == trade_id)
     if assigned_vendor_id is not None:
-        filters.append(WorkOrder.assigned_vendor_id == assigned_vendor_id)
+        # Match via the junction so a vendor's list includes WOs where they're
+        # a secondary assignment, not only where they're the primary.
+        filters.append(
+            WorkOrder.id.in_(
+                select(WoVendorAssignment.work_order_id).where(
+                    WoVendorAssignment.vendor_id == assigned_vendor_id
+                )
+            )
+        )
     if updated_since is not None:
         filters.append(WorkOrder.sc_updated_date >= updated_since)
     if stage is not None:
@@ -377,6 +387,7 @@ async def list_work_orders(
             selectinload(WorkOrder.location),
             selectinload(WorkOrder.trade),
             selectinload(WorkOrder.assigned_vendor),
+            _assignment_loader(),
         )
         .order_by(WorkOrder.sc_work_order_id.desc())
         .offset((page - 1) * page_size)
@@ -442,6 +453,43 @@ async def trigger_work_order_sync() -> WorkOrderSyncSummary:
     )
 
 
+def _assignment_loader():
+    """Eager-load options for a WO's multi-vendor assignments (+ each
+    assignment's vendor and job type). Reused everywhere a WorkOrder schema
+    is validated so `vendor_assignments` never lazy-loads under async."""
+    return selectinload(WorkOrder.vendor_assignments).options(
+        selectinload(WoVendorAssignment.vendor),
+        selectinload(WoVendorAssignment.job_type),
+    )
+
+
+def _resync_primary(wo: WorkOrder) -> None:
+    """Keep the legacy single-vendor fields in sync with the junction.
+
+    `assigned_vendor_id` mirrors the first assignment (the "primary"), and
+    `brenk_vendor_notified_at` mirrors that primary's per-vendor notified
+    timestamp — so all the single-vendor readers (next-step, pipeline,
+    reports, the markup helper's dispatch checks) keep working unchanged.
+    """
+    assignments = sorted(wo.vendor_assignments, key=lambda a: (a.created_at, a.id))
+    primary = assignments[0] if assignments else None
+    wo.assigned_vendor_id = primary.vendor_id if primary else None
+    wo.brenk_vendor_notified_at = primary.notified_at if primary else None
+
+
+def _resync_cost_rollup(wo: WorkOrder) -> None:
+    """Keep the WO-level vendor cost = sum of the per-vendor payouts, so the
+    invoice/money/markup math (which reads `brenk_labor_cost`/
+    `brenk_material_cost`) works unchanged. Only applies when the WO has
+    assignments; an unassigned WO keeps its directly-entered legacy costs."""
+    if not wo.vendor_assignments:
+        return
+    labors = [a.labor_cost for a in wo.vendor_assignments if a.labor_cost is not None]
+    materials = [a.material_cost for a in wo.vendor_assignments if a.material_cost is not None]
+    wo.brenk_labor_cost = sum(labors) if labors else None
+    wo.brenk_material_cost = sum(materials) if materials else None
+
+
 async def _fetch_work_order(
     db: AsyncSession,
     work_order_id: int,
@@ -465,6 +513,7 @@ async def _fetch_work_order(
             selectinload(WorkOrder.location),
             selectinload(WorkOrder.trade),
             selectinload(WorkOrder.assigned_vendor),
+            _assignment_loader(),
         )
         .where(WorkOrder.id == work_order_id)
     )
@@ -490,6 +539,200 @@ async def get_work_order(
     """
     wo = await _fetch_work_order(db, work_order_id)
     return await _to_detail(db, wo)
+
+
+# -----------------------------------------------------------------------------
+# Multi-vendor assignments
+# -----------------------------------------------------------------------------
+
+
+class AssignmentCreate(BaseModel):
+    """Body for POST /work-orders/{id}/assignments — add a vendor to the WO."""
+
+    vendor_id: int
+    job_type_id: int | None = None
+
+
+class AssignmentNotify(BaseModel):
+    """Body for PATCH /work-orders/{id}/assignments/{vendor_id}."""
+
+    notified: Literal["now", "clear"] | None = None
+    # Mark Brenk's payment to THIS sub-vendor ("now"/"clear").
+    paid: Literal["now", "clear"] | None = None
+    job_type_id: int | None = None
+    set_job_type: bool = Field(
+        default=False,
+        description="When true, apply job_type_id (even if null) to the assignment.",
+    )
+
+
+async def _validate_assignment_refs(
+    db: AsyncSession, vendor_id: int, job_type_id: int | None
+) -> None:
+    vendor = (
+        await db.execute(select(Vendor.id).where(Vendor.id == vendor_id))
+    ).scalar_one_or_none()
+    if vendor is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"vendor {vendor_id} not found",
+        )
+    if job_type_id is not None:
+        jt = (
+            await db.execute(select(JobType.id).where(JobType.id == job_type_id))
+        ).scalar_one_or_none()
+        if jt is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail=f"job type {job_type_id} not found",
+            )
+
+
+@router.post("/{work_order_id}/assignments", response_model=WorkOrderDetail)
+async def add_assignment(
+    work_order_id: int,
+    payload: AssignmentCreate,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderDetail:
+    """Assign a sub-vendor to this WO (idempotent per vendor). Splitting a job
+    across vendors is just multiple assignments."""
+    wo = await _fetch_work_order(db, work_order_id)
+    await _validate_assignment_refs(db, payload.vendor_id, payload.job_type_id)
+
+    existing = next((a for a in wo.vendor_assignments if a.vendor_id == payload.vendor_id), None)
+    if existing is None:
+        db.add(
+            WoVendorAssignment(
+                work_order_id=wo.id,
+                vendor_id=payload.vendor_id,
+                job_type_id=payload.job_type_id,
+            )
+        )
+    elif payload.job_type_id is not None:
+        existing.job_type_id = payload.job_type_id
+
+    await db.commit()
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    _resync_primary(fresh)
+    await db.commit()
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    return await _to_detail(db, fresh)
+
+
+@router.delete("/{work_order_id}/assignments/{vendor_id}", response_model=WorkOrderDetail)
+async def remove_assignment(
+    work_order_id: int,
+    vendor_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderDetail:
+    """Unassign a sub-vendor from this WO."""
+    wo = await _fetch_work_order(db, work_order_id)
+    target = next((a for a in wo.vendor_assignments if a.vendor_id == vendor_id), None)
+    if target is not None:
+        await db.delete(target)
+        await db.commit()
+        fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+        _resync_primary(fresh)
+        await db.commit()
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    return await _to_detail(db, fresh)
+
+
+@router.patch("/{work_order_id}/assignments/{vendor_id}", response_model=WorkOrderDetail)
+async def update_assignment(
+    work_order_id: int,
+    vendor_id: int,
+    payload: AssignmentNotify,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderDetail:
+    """Update one vendor's assignment — mark them notified (`notified: now`/
+    `clear`) and/or set the aspect they cover (`set_job_type` + job_type_id)."""
+    wo = await _fetch_work_order(db, work_order_id)
+    target = next((a for a in wo.vendor_assignments if a.vendor_id == vendor_id), None)
+    if target is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"vendor {vendor_id} is not assigned to work order {work_order_id}",
+        )
+    if payload.notified == "now":
+        target.notified_at = datetime.now(UTC)
+    elif payload.notified == "clear":
+        target.notified_at = None
+    if payload.paid == "now":
+        target.paid_to_vendor_at = datetime.now(UTC)
+    elif payload.paid == "clear":
+        target.paid_to_vendor_at = None
+    if payload.set_job_type:
+        await _validate_assignment_refs(db, vendor_id, payload.job_type_id)
+        target.job_type_id = payload.job_type_id
+
+    await db.commit()
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    _resync_primary(fresh)
+    await db.commit()
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    return await _to_detail(db, fresh)
+
+
+class AssignmentCostInput(BaseModel):
+    vendor_id: int
+    labor_cost: Decimal | None = Field(default=None, ge=0)
+    material_cost: Decimal | None = Field(default=None, ge=0)
+
+
+class PricingUpdate(BaseModel):
+    """Body for PUT /work-orders/{id}/pricing — set per-vendor payouts and the
+    WO-level markup/total in one atomic call (the itemized markup helper).
+
+    `set_markup`/`set_total` distinguish "leave alone" from "set to null".
+    """
+
+    costs: list[AssignmentCostInput] = Field(default_factory=list)
+    brenk_markup_percent: Decimal | None = Field(default=None, ge=0, le=1000)
+    brenk_total_override: Decimal | None = Field(default=None, ge=0)
+    set_markup: bool = False
+    set_total: bool = False
+
+
+@router.put("/{work_order_id}/pricing", response_model=WorkOrderDetail)
+async def update_pricing(
+    work_order_id: int,
+    payload: PricingUpdate,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> WorkOrderDetail:
+    """Save the itemized pricing: each vendor's labor/material payout plus the
+    WO-level markup % or direct total. The WO-level vendor cost is resynced to
+    the sum of payouts so the invoice/money math reads it unchanged."""
+    wo = await _fetch_work_order(db, work_order_id)
+
+    by_vendor = {a.vendor_id: a for a in wo.vendor_assignments}
+    for c in payload.costs:
+        assignment = by_vendor.get(c.vendor_id)
+        if assignment is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail=f"vendor {c.vendor_id} is not assigned to work order {work_order_id}",
+            )
+        assignment.labor_cost = c.labor_cost
+        assignment.material_cost = c.material_cost
+    _resync_cost_rollup(wo)
+
+    # WO-level markup/total + the first-priced timestamp (same rule as PATCH).
+    was_priced = wo.brenk_markup_percent is not None or wo.brenk_total_override is not None
+    if payload.set_markup:
+        wo.brenk_markup_percent = payload.brenk_markup_percent
+    if payload.set_total:
+        wo.brenk_total_override = payload.brenk_total_override
+    if payload.set_markup or payload.set_total:
+        now_priced = wo.brenk_markup_percent is not None or wo.brenk_total_override is not None
+        if not now_priced:
+            wo.brenk_marked_up_at = None
+        elif not was_priced:
+            wo.brenk_marked_up_at = datetime.now(UTC)
+
+    await db.commit()
+    fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
+    return await _to_detail(db, fresh)
 
 
 @router.get(
@@ -693,7 +936,19 @@ async def update_work_order(
                     status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail=f"vendor {new_vendor_id} not found",
                 )
+        # Single-vendor back-compat: setting assigned_vendor_id makes that
+        # vendor the SOLE assignment (clearing the rest). Use the assignment
+        # endpoints to split a job across multiple vendors.
+        keep = None
+        for a in list(wo.vendor_assignments):
+            if new_vendor_id is not None and a.vendor_id == new_vendor_id:
+                keep = a
+            else:
+                await db.delete(a)
+        if new_vendor_id is not None and keep is None:
+            db.add(WoVendorAssignment(work_order_id=wo.id, vendor_id=new_vendor_id))
         wo.assigned_vendor_id = new_vendor_id
+        wo.brenk_vendor_notified_at = keep.notified_at if keep is not None else None
 
     if "brenk_labor_cost" in update_data:
         wo.brenk_labor_cost = update_data["brenk_labor_cost"]
@@ -728,10 +983,13 @@ async def update_work_order(
 
     if "notified" in update_data:
         action = update_data["notified"]
-        if action == "now":
-            wo.brenk_vendor_notified_at = datetime.now(UTC)
-        elif action == "clear":
-            wo.brenk_vendor_notified_at = None
+        stamp = datetime.now(UTC) if action == "now" else None
+        wo.brenk_vendor_notified_at = stamp
+        # Mirror onto the primary assignment so the junction stays consistent
+        # (per-vendor notify uses the assignment endpoints directly).
+        assignments = sorted(wo.vendor_assignments, key=lambda a: (a.created_at, a.id))
+        if assignments:
+            assignments[0].notified_at = stamp
 
     # Category: a manual override (validated against the taxonomy) takes
     # precedence; otherwise a "confirm" marks the current AI value accepted.

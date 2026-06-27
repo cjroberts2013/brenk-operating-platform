@@ -9,6 +9,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.job_type import JobTypeRef
+
 
 class _OrmModel(BaseModel):
     """Shared base that opts every schema into reading from ORM attributes."""
@@ -48,6 +50,22 @@ class VendorRef(_OrmModel):
     id: int
     sc_provider_id: int | None
     name: str
+
+
+class AssignedVendor(_OrmModel):
+    """One sub-vendor assigned to a work order (multi-vendor junction row).
+
+    `notified_at` is per-vendor; the optional `job_type` is the aspect this
+    vendor covers on the job.
+    """
+
+    vendor: VendorRef
+    job_type: JobTypeRef | None
+    notified_at: datetime | None
+    # Per-vendor payout (Brenk-confidential) + when Brenk paid this sub-vendor.
+    labor_cost: Decimal | None
+    material_cost: Decimal | None
+    paid_to_vendor_at: datetime | None
 
 
 class InvoiceSummary(_OrmModel):
@@ -138,6 +156,7 @@ class WorkOrderSummary(_OrmModel):
     location: LocationRef | None
     client: ClientRef | None
     assigned_vendor: VendorRef | None
+    vendor_assignments: list[AssignedVendor]
     nte: Decimal | None
     scheduled_date: datetime | None
     sc_updated_date: datetime | None
@@ -184,6 +203,7 @@ class WorkOrderDetail(_OrmModel):
     location: LocationRef | None
     trade: TradeRef | None
     assigned_vendor: VendorRef | None
+    vendor_assignments: list[AssignedVendor]
 
     primary_status: str
     extended_status: str | None

@@ -71,6 +71,30 @@ class VendorSpend(BaseModel):
     total_margin: str
 
 
+class VendorPayable(BaseModel):
+    """One outstanding sub-vendor payout — Brenk owes this vendor for this WO.
+
+    `client_paid` flags the cashflow-urgent case: the client has already paid
+    Brenk for the job, but Brenk hasn't yet paid the sub-vendor.
+    """
+
+    work_order_id: int
+    sc_number: str
+    vendor_id: int
+    vendor_name: str
+    location: str | None
+    payout: str  # labor + material owed to this vendor
+    client_paid: bool
+
+
+class PayablesResponse(BaseModel):
+    """Everything Brenk still owes its sub-vendors, urgent (client-paid) first."""
+
+    items: list[VendorPayable]
+    total_outstanding: str  # sum of every unpaid payout
+    total_client_paid: str  # subset where the client already paid Brenk
+
+
 class ReportsTotals(BaseModel):
     """Top-line money figures across every marked-up work order."""
 

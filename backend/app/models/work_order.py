@@ -293,6 +293,45 @@ class Vendor(Base, TimestampMixin):
         return f"<Vendor {self.name}>"
 
 
+class WoVendorAssignment(Base, TimestampMixin):
+    """A sub-vendor assigned to a work order.
+
+    Replaces the single `work_orders.assigned_vendor_id` with a many-to-many
+    so one job can be split across vendors (e.g. locksmith + electrician).
+    `assigned_vendor_id` is kept in sync as the "primary" (first) vendor for
+    back-compat. `notified_at` is per-vendor; per-vendor payout fields land in
+    a later phase.
+    """
+
+    __tablename__ = "wo_vendor_assignments"
+    __table_args__ = (UniqueConstraint("work_order_id", "vendor_id", name="uq_wo_vendor"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(
+        ForeignKey("work_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    vendor_id: Mapped[int] = mapped_column(
+        ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Which aspect/skill this vendor covers on the job (optional).
+    job_type_id: Mapped[int | None] = mapped_column(ForeignKey("job_types.id"))
+    # When Brenk reached THIS vendor (per-vendor notify milestone).
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # What Brenk pays THIS vendor — Brenk-confidential, never sent to SC. The
+    # WO-level brenk_labor_cost/brenk_material_cost are kept as the rollup sum.
+    labor_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    material_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    # When Brenk paid THIS sub-vendor (drives the payables view).
+    paid_to_vendor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(Text)
+
+    vendor: Mapped["Vendor"] = relationship()
+    job_type: Mapped["JobType | None"] = relationship()
+
+    def __repr__(self) -> str:
+        return f"<WoVendorAssignment wo={self.work_order_id} vendor={self.vendor_id}>"
+
+
 # =============================================================================
 # Work Orders
 # =============================================================================
@@ -448,6 +487,13 @@ class WorkOrder(Base, TimestampMixin):
     location: Mapped["Location | None"] = relationship(back_populates="work_orders")
     trade: Mapped["Trade | None"] = relationship(back_populates="work_orders")
     assigned_vendor: Mapped["Vendor | None"] = relationship(back_populates="work_orders")
+    # Multi-vendor assignments (the junction). `assigned_vendor_id` above is
+    # kept in sync as the primary (first) for back-compat with single-vendor
+    # readers.
+    vendor_assignments: Mapped[list["WoVendorAssignment"]] = relationship(
+        cascade="all, delete-orphan",
+        order_by="WoVendorAssignment.created_at",
+    )
     notes: Mapped[list["WorkOrderNote"]] = relationship(
         back_populates="work_order", cascade="all, delete-orphan"
     )

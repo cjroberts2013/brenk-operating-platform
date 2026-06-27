@@ -55,6 +55,63 @@ export function getVendorSuggestions(
   )
 }
 
+/** Add a sub-vendor to a work order (idempotent per vendor). */
+export function addAssignment(
+  workOrderId: number,
+  body: { vendor_id: number; job_type_id?: number | null },
+): Promise<WorkOrderDetail> {
+  return apiFetch<WorkOrderDetail>(
+    `/api/v1/work-orders/${workOrderId}/assignments`,
+    { method: 'POST', body },
+  )
+}
+
+/** Remove a sub-vendor from a work order. */
+export function removeAssignment(
+  workOrderId: number,
+  vendorId: number,
+): Promise<WorkOrderDetail> {
+  return apiFetch<WorkOrderDetail>(
+    `/api/v1/work-orders/${workOrderId}/assignments/${vendorId}`,
+    { method: 'DELETE' },
+  )
+}
+
+/** Update one vendor's assignment — per-vendor notify, paid, and/or aspect. */
+export function updateAssignment(
+  workOrderId: number,
+  vendorId: number,
+  body: {
+    notified?: 'now' | 'clear'
+    paid?: 'now' | 'clear'
+    set_job_type?: boolean
+    job_type_id?: number | null
+  },
+): Promise<WorkOrderDetail> {
+  return apiFetch<WorkOrderDetail>(
+    `/api/v1/work-orders/${workOrderId}/assignments/${vendorId}`,
+    { method: 'PATCH', body },
+  )
+}
+
+/** Save the itemized pricing — per-vendor payouts + WO markup/total — in one
+ *  atomic call. `set_markup`/`set_total` distinguish "leave alone" from null. */
+export function updatePricing(
+  workOrderId: number,
+  body: {
+    costs: { vendor_id: number; labor_cost: string | null; material_cost: string | null }[]
+    brenk_markup_percent?: string | null
+    brenk_total_override?: string | null
+    set_markup?: boolean
+    set_total?: boolean
+  },
+): Promise<WorkOrderDetail> {
+  return apiFetch<WorkOrderDetail>(`/api/v1/work-orders/${workOrderId}/pricing`, {
+    method: 'PUT',
+    body,
+  })
+}
+
 export function listCategories(): Promise<{ categories: string[] }> {
   return apiFetch<{ categories: string[] }>('/api/v1/categories/')
 }
