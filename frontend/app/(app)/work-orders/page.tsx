@@ -1,6 +1,11 @@
 import Link from 'next/link'
-import { ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/20/solid'
+import {
+  ExclamationTriangleIcon,
+  SparklesIcon,
+  XMarkIcon,
+} from '@heroicons/react/20/solid'
 
+import { CategoryCell } from '@/components/work-orders/CategoryCell'
 import { Pagination } from '@/components/work-orders/Pagination'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { StatusFilter } from '@/components/work-orders/StatusFilter'
@@ -69,12 +74,14 @@ function buildHref(params: {
   q?: string
   stage?: string
   stuck?: boolean
+  review?: boolean
 }): string {
   const p = new URLSearchParams()
   if (params.status) p.set('status', params.status)
   if (params.q) p.set('q', params.q)
   if (params.stage) p.set('stage', params.stage)
   if (params.stuck) p.set('stuck', '1')
+  if (params.review) p.set('category_review', '1')
   const qs = p.toString()
   return qs ? `/work-orders?${qs}` : '/work-orders'
 }
@@ -91,6 +98,7 @@ export default async function WorkOrdersPage({
   const q = stringParam(sp.q)
   const stage = parseStage(sp.stage)
   const stuck = parseBool(sp.stuck)
+  const review = parseBool(sp.category_review)
 
   // Fire list + sync-status in parallel; both are cheap and they're
   // independent of each other.
@@ -102,15 +110,24 @@ export default async function WorkOrdersPage({
       ...(q ? { q } : {}),
       ...(stage ? { stage } : {}),
       ...(stuck ? { stuck: true } : {}),
+      ...(review ? { category_review: true } : {}),
     }),
     getWorkOrderSyncStatus(),
   ])
 
   // Dropping a filter expands the result set, so each "clear" link
   // also resets pagination by omitting `page`.
-  const clearStageHref = buildHref({ status, q, stuck })
-  const clearStuckHref = buildHref({ status, q, stage })
-  const toggleStuckHref = buildHref({ status, q, stage, stuck: !stuck })
+  const clearStageHref = buildHref({ status, q, stuck, review })
+  const clearStuckHref = buildHref({ status, q, stage, review })
+  const toggleStuckHref = buildHref({ status, q, stage, stuck: !stuck, review })
+  const clearReviewHref = buildHref({ status, q, stage, stuck })
+  const toggleReviewHref = buildHref({
+    status,
+    q,
+    stage,
+    stuck,
+    review: !review,
+  })
 
   return (
     <div className="space-y-6">
@@ -129,7 +146,8 @@ export default async function WorkOrdersPage({
             ) : null}
             {status ? <> · filtered to <strong>{status}</strong></> : null}
             {q ? <> · matching <strong>“{q}”</strong></> : null}
-            {stuck ? <> · <strong>stuck</strong> only</> : null} ·
+            {stuck ? <> · <strong>stuck</strong> only</> : null}
+            {review ? <> · <strong>category needs review</strong></> : null} ·
             newest first
           </p>
         </div>
@@ -146,14 +164,30 @@ export default async function WorkOrdersPage({
             <ExclamationTriangleIcon className="size-4" />
             {stuck ? 'Showing stuck' : 'Stuck only'}
           </Link>
+          <Link
+            href={toggleReviewHref}
+            title={
+              review
+                ? 'Show all work orders'
+                : 'Show only WOs whose category is AI-suggested and not yet confirmed'
+            }
+            className={
+              review
+                ? 'inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800'
+                : 'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5'
+            }
+          >
+            <SparklesIcon className="size-4" />
+            {review ? 'Showing needs-review' : 'Needs review'}
+          </Link>
           <StatusFilter current={status} />
         </div>
       </header>
 
-      {stage || stuck ? (
+      {stage || stuck || review ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Active filter{stage && stuck ? 's' : ''}:
+            Active filter{[stage, stuck, review].filter(Boolean).length > 1 ? 's' : ''}:
           </span>
           {stage ? (
             <Link
@@ -175,6 +209,16 @@ export default async function WorkOrdersPage({
               <XMarkIcon className="size-3 text-red-400 transition group-hover:text-red-700 dark:text-red-500 dark:group-hover:text-red-300" />
             </Link>
           ) : null}
+          {review ? (
+            <Link
+              href={clearReviewHref}
+              title="Clear category-review filter"
+              className="group inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800"
+            >
+              Category needs review
+              <XMarkIcon className="size-3 text-amber-400 transition group-hover:text-amber-700 dark:text-amber-500 dark:group-hover:text-amber-300" />
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
@@ -182,7 +226,7 @@ export default async function WorkOrdersPage({
 
       <div className="overflow-hidden rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
         {data.items.length === 0 ? (
-          <EmptyState hasFilter={Boolean(status || q || stage || stuck)} />
+          <EmptyState hasFilter={Boolean(status || q || stage || stuck || review)} />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-white/10">
@@ -192,6 +236,7 @@ export default async function WorkOrdersPage({
                   <Th>WO #</Th>
                   <Th>Location</Th>
                   <Th>Trade</Th>
+                  <Th>Category</Th>
                   <Th>Vendor</Th>
                   <Th>Priority</Th>
                   <Th align="right">NTE</Th>
@@ -238,6 +283,13 @@ export default async function WorkOrdersPage({
                       ) : null}
                     </Td>
                     <Td>{wo.trade?.name ?? '—'}</Td>
+                    <Td>
+                      <CategoryCell
+                        category={wo.brenk_category}
+                        source={wo.brenk_category_source}
+                        confidence={wo.brenk_category_confidence}
+                      />
+                    </Td>
                     <Td>
                       {wo.assigned_vendor ? (
                         <span className="inline-flex items-center gap-1">

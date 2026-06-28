@@ -109,6 +109,27 @@ async def test_list_filter_by_status(client: httpx.AsyncClient) -> None:
         assert item["primary_status"] == "COMPLETED"
 
 
+async def test_list_item_includes_category_fields(client: httpx.AsyncClient) -> None:
+    body = await _list(client, page_size=1)
+    if body["total"] == 0:
+        pytest.skip("dev DB has no work orders")
+    item = body["items"][0]
+    for key in (
+        "brenk_category",
+        "brenk_category_source",
+        "brenk_category_confidence",
+    ):
+        assert key in item, f"missing {key} in summary"
+
+
+async def test_list_category_review_filter(client: httpx.AsyncClient) -> None:
+    body = await _list(client, category_review=True, page_size=10)
+    # Every returned WO must be an unreviewed AI guess; the filter is a no-op
+    # safe to run even when the dev DB has no AI-categorized rows yet.
+    for item in body["items"]:
+        assert item["brenk_category_source"] == "ai"
+
+
 async def test_detail_returns_full_shape(client: httpx.AsyncClient) -> None:
     listed = await _list(client, page_size=1)
     if listed["total"] == 0:

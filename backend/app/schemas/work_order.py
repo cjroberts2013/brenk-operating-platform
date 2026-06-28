@@ -174,6 +174,14 @@ class WorkOrderSummary(_OrmModel):
     brenk_paid_at: datetime | None
     brenk_vendor_notified_at: datetime | None
 
+    # Brenk job category (curated taxonomy — distinct from the SC `trade`).
+    # Surfaced on the list so operators can see the category + tell an
+    # unreviewed AI guess (source 'ai') from a confirmed/manual one at a
+    # glance, and page through the AI ones via ?category_review=true.
+    brenk_category: str | None
+    brenk_category_source: str | None  # 'ai' | 'confirmed' | 'manual'
+    brenk_category_confidence: Decimal | None
+
     # Computed by the list endpoint (not an ORM column): is this WO
     # sitting in its stage past the dashboard's stuck threshold? Lets
     # the list flag stalled rows inline. Defaults False; set per row

@@ -74,6 +74,13 @@ export type WorkOrderSummary = {
   brenk_marked_up_at: string | null
   brenk_paid_at: string | null
   brenk_vendor_notified_at: string | null
+  /** Brenk job category (curated taxonomy — distinct from the SC `trade`).
+   *  `source`: 'ai' = Gemini-suggested, unreviewed; 'confirmed' = operator
+   *  accepted the AI guess; 'manual' = operator set/changed it. `confidence`
+   *  is Gemini's 0–1 score (decimal string), only meaningful for 'ai'. */
+  brenk_category: string | null
+  brenk_category_source: string | null // 'ai' | 'confirmed' | 'manual'
+  brenk_category_confidence: string | null
   /** Computed by the list endpoint: WO is past its stage's stuck
    *  threshold (same definition the dashboard uses). */
   is_stuck: boolean
@@ -337,6 +344,9 @@ export type WorkOrderListParams = {
   invoice_tab?: InvoiceTab
   /** Only WOs stuck past their stage's age threshold. */
   stuck?: boolean
+  /** Only WOs whose category is AI-suggested and not yet confirmed
+   *  (brenk_category_source = 'ai'). Drives the "Needs review" toggle. */
+  category_review?: boolean
   page?: number
   page_size?: number
 }

@@ -232,6 +232,16 @@ async def list_work_orders(
             ),
         ),
     ] = False,
+    category_review: Annotated[
+        bool,
+        Query(
+            description=(
+                "If true, return only WOs whose Brenk category was set by AI "
+                "and not yet reviewed (brenk_category_source = 'ai'). Lets the "
+                "operator page through and confirm/correct the AI guesses."
+            ),
+        ),
+    ] = False,
     page: Annotated[int, Query(ge=1, description="1-indexed page number")] = 1,
     page_size: Annotated[
         int,
@@ -344,6 +354,11 @@ async def list_work_orders(
     # Same source-of-truth thresholds as the dashboard's is_stuck().
     if stuck:
         filters.append(stuck_filter_clause())
+
+    # Category-review filter: AI-suggested categories the operator hasn't
+    # confirmed or overridden yet (source stays 'ai' until they act).
+    if category_review:
+        filters.append(WorkOrder.brenk_category_source == "ai")
 
     # Free-text search. We OR across columns the operator is likely to
     # type — WO number, SC purchase number, problem code, caller free
