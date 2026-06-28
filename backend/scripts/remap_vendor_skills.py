@@ -9,18 +9,35 @@ Idempotent: re-running sets each vendor's skills to the mapped set. Dry-run by
 default; pass --commit to write. Unmapped trades (e.g. "Software Development")
 are reported and skipped.
 
-    python scripts/remap_vendor_skills.py            # dry run
-    python scripts/remap_vendor_skills.py --commit    # apply
-    python scripts/remap_vendor_skills.py --commit .env.production
+    python scripts/remap_vendor_skills.py                    # dry run (dev)
+    python scripts/remap_vendor_skills.py --commit            # apply (dev)
+    python scripts/remap_vendor_skills.py .env.production            # dry run (prod)
+    python scripts/remap_vendor_skills.py --commit .env.production    # apply (prod)
 """
 
+import os
 import sys
+from pathlib import Path
 
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.db.session import SessionLocal
-from app.models.work_order import JobType, Vendor
+
+def _inject_env(env_path: Path) -> None:
+    """Load DATABASE_URL* from the chosen env file into os.environ BEFORE the
+    app config is imported, so the script targets the right database (env vars
+    take precedence over the .env file pydantic would otherwise read)."""
+    if not env_path.exists():
+        raise SystemExit(f"env file not found: {env_path}")
+    for raw in env_path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("DATABASE_URL"):
+            os.environ[key] = value.strip().strip('"').strip("'")
+
 
 # Legacy trade name -> job-type name. Anything not listed is dropped (reported).
 MAPPING: dict[str, str] = {
@@ -46,6 +63,17 @@ MAPPING: dict[str, str] = {
 
 def main() -> None:
     commit = "--commit" in sys.argv
+    env_arg = next((a for a in sys.argv[1:] if not a.startswith("--")), ".env")
+    _inject_env(BACKEND_ROOT / env_arg)
+
+    # Imported AFTER env injection so the right database is used.
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.db.session import SessionLocal
+    from app.models.work_order import JobType, Vendor
+
+    print(f"=== Vendor skill remap ({env_arg}) ===\n")
     session = SessionLocal()
     try:
         job_types = {jt.name: jt for jt in session.execute(select(JobType)).scalars()}
