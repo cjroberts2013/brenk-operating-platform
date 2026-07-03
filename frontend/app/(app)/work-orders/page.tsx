@@ -6,6 +6,7 @@ import {
 } from '@heroicons/react/20/solid'
 
 import { CategoryCell } from '@/components/work-orders/CategoryCell'
+import { DeadlineBadge } from '@/components/work-orders/DeadlineBadge'
 import { Pagination } from '@/components/work-orders/Pagination'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { StatusFilter } from '@/components/work-orders/StatusFilter'
@@ -14,12 +15,21 @@ import {
   getWorkOrderSyncStatus,
   listWorkOrders,
 } from '@/lib/api/work-orders'
-import { STAGE_LABELS, type PipelineStageKey } from '@/lib/api/types'
+import {
+  DEADLINE_FILTER_LABELS,
+  STAGE_LABELS,
+  type DeadlineFilterKey,
+  type PipelineStageKey,
+} from '@/lib/api/types'
 import { money, relativeTime, shortDate } from '@/lib/format'
 
 const DEFAULT_PAGE_SIZE = 50
 
 const STAGE_KEYS = Object.keys(STAGE_LABELS) as PipelineStageKey[]
+
+const DEADLINE_KEYS = Object.keys(
+  DEADLINE_FILTER_LABELS,
+) as DeadlineFilterKey[]
 
 function parseStage(
   value: string | string[] | undefined,
@@ -28,6 +38,16 @@ function parseStage(
   if (!raw) return undefined
   return (STAGE_KEYS as string[]).includes(raw)
     ? (raw as PipelineStageKey)
+    : undefined
+}
+
+function parseDeadline(
+  value: string | string[] | undefined,
+): DeadlineFilterKey | undefined {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (!raw) return undefined
+  return (DEADLINE_KEYS as string[]).includes(raw)
+    ? (raw as DeadlineFilterKey)
     : undefined
 }
 
@@ -75,6 +95,7 @@ function buildHref(params: {
   stage?: string
   stuck?: boolean
   review?: boolean
+  deadline?: string
 }): string {
   const p = new URLSearchParams()
   if (params.status) p.set('status', params.status)
@@ -82,6 +103,7 @@ function buildHref(params: {
   if (params.stage) p.set('stage', params.stage)
   if (params.stuck) p.set('stuck', '1')
   if (params.review) p.set('category_review', '1')
+  if (params.deadline) p.set('deadline', params.deadline)
   const qs = p.toString()
   return qs ? `/work-orders?${qs}` : '/work-orders'
 }
@@ -99,6 +121,7 @@ export default async function WorkOrdersPage({
   const stage = parseStage(sp.stage)
   const stuck = parseBool(sp.stuck)
   const review = parseBool(sp.category_review)
+  const deadline = parseDeadline(sp.deadline)
 
   // Fire list + sync-status in parallel; both are cheap and they're
   // independent of each other.
@@ -111,23 +134,33 @@ export default async function WorkOrdersPage({
       ...(stage ? { stage } : {}),
       ...(stuck ? { stuck: true } : {}),
       ...(review ? { category_review: true } : {}),
+      ...(deadline ? { deadline } : {}),
     }),
     getWorkOrderSyncStatus(),
   ])
 
   // Dropping a filter expands the result set, so each "clear" link
   // also resets pagination by omitting `page`.
-  const clearStageHref = buildHref({ status, q, stuck, review })
-  const clearStuckHref = buildHref({ status, q, stage, review })
-  const toggleStuckHref = buildHref({ status, q, stage, stuck: !stuck, review })
-  const clearReviewHref = buildHref({ status, q, stage, stuck })
+  const clearStageHref = buildHref({ status, q, stuck, review, deadline })
+  const clearStuckHref = buildHref({ status, q, stage, review, deadline })
+  const toggleStuckHref = buildHref({
+    status,
+    q,
+    stage,
+    stuck: !stuck,
+    review,
+    deadline,
+  })
+  const clearReviewHref = buildHref({ status, q, stage, stuck, deadline })
   const toggleReviewHref = buildHref({
     status,
     q,
     stage,
     stuck,
     review: !review,
+    deadline,
   })
+  const clearDeadlineHref = buildHref({ status, q, stage, stuck, review })
 
   return (
     <div className="space-y-6">
@@ -147,7 +180,10 @@ export default async function WorkOrdersPage({
             {status ? <> · filtered to <strong>{status}</strong></> : null}
             {q ? <> · matching <strong>“{q}”</strong></> : null}
             {stuck ? <> · <strong>stuck</strong> only</> : null}
-            {review ? <> · <strong>category needs review</strong></> : null} ·
+            {review ? <> · <strong>category needs review</strong></> : null}
+            {deadline ? (
+              <> · <strong>{DEADLINE_FILTER_LABELS[deadline].toLowerCase()}</strong></>
+            ) : null} ·
             newest first
           </p>
         </div>
@@ -184,10 +220,10 @@ export default async function WorkOrdersPage({
         </div>
       </header>
 
-      {stage || stuck || review ? (
+      {stage || stuck || review || deadline ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Active filter{[stage, stuck, review].filter(Boolean).length > 1 ? 's' : ''}:
+            Active filter{[stage, stuck, review, deadline].filter(Boolean).length > 1 ? 's' : ''}:
           </span>
           {stage ? (
             <Link
@@ -219,6 +255,16 @@ export default async function WorkOrdersPage({
               <XMarkIcon className="size-3 text-amber-400 transition group-hover:text-amber-700 dark:text-amber-500 dark:group-hover:text-amber-300" />
             </Link>
           ) : null}
+          {deadline ? (
+            <Link
+              href={clearDeadlineHref}
+              title="Clear deadline filter"
+              className="group inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-800"
+            >
+              {DEADLINE_FILTER_LABELS[deadline]}
+              <XMarkIcon className="size-3 text-red-400 transition group-hover:text-red-700 dark:text-red-500 dark:group-hover:text-red-300" />
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
@@ -226,7 +272,9 @@ export default async function WorkOrdersPage({
 
       <div className="overflow-hidden rounded-lg ring-1 ring-gray-200 dark:ring-white/10">
         {data.items.length === 0 ? (
-          <EmptyState hasFilter={Boolean(status || q || stage || stuck || review)} />
+          <EmptyState
+            hasFilter={Boolean(status || q || stage || stuck || review || deadline)}
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-white/10">
@@ -262,6 +310,10 @@ export default async function WorkOrdersPage({
                             Stuck
                           </span>
                         ) : null}
+                        <DeadlineBadge
+                          urgency={wo.deadline_urgency}
+                          daysPast={wo.deadline_days_past}
+                        />
                       </div>
                     </Td>
                     <Td>

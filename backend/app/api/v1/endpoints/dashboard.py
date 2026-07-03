@@ -14,6 +14,7 @@ CASE-based SQL group-by.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -25,10 +26,18 @@ from app.db.session import get_async_db
 from app.models.work_order import WorkOrder
 from app.schemas.dashboard import (
     DashboardPipeline,
+    DeadlineWatch,
     PipelineStage,
     StuckWorkOrder,
 )
 from app.schemas.work_order import LocationRef, TradeRef, VendorRef
+from app.services.deadlines import (
+    DUE_SOON_DAYS,
+    classify_urgency,
+    deadline_for,
+    is_at_risk_status,
+    section_for,
+)
 from app.services.money import compute_money_stats
 from app.services.pipeline import (
     STAGE_BY_KEY,
@@ -75,7 +84,24 @@ async def get_pipeline(
     per_stage_stuck_count: dict[str, int] = {s.key: 0 for s in STAGES}
     stuck_candidates: list[tuple[float, WorkOrder, str]] = []
 
+    # Deadline watch: turnaround urgency over unfinished WOs, same
+    # definitions as the ?deadline= list filter so panel counts match
+    # the lists they link to.
+    now = datetime.now(UTC)
+    deadline_counts = {
+        "overdue": 0,
+        "due_soon": 0,
+        "needs_action": 0,
+        "waiting_on_cubesmart": 0,
+    }
+
     for wo in rows:
+        if is_at_risk_status(wo.primary_status):
+            urgency = classify_urgency(deadline_for(wo.scheduled_date, wo.call_date), now)
+            if urgency in ("overdue", "due_soon"):
+                deadline_counts[urgency] += 1
+                deadline_counts[section_for(wo.extended_status)] += 1
+
         stage_key = classify(
             wo.primary_status, wo.extended_status, wo.assigned_vendor_id is not None
         )
@@ -150,4 +176,11 @@ async def get_pipeline(
         total_open=total_open,
         total_invoiced=total_invoiced,
         money=compute_money_stats(list(rows)),
+        deadline_watch=DeadlineWatch(
+            overdue_count=deadline_counts["overdue"],
+            due_soon_count=deadline_counts["due_soon"],
+            needs_action_count=deadline_counts["needs_action"],
+            waiting_on_cubesmart_count=deadline_counts["waiting_on_cubesmart"],
+            due_soon_window_days=DUE_SOON_DAYS,
+        ),
     )

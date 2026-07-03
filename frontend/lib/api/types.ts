@@ -84,6 +84,13 @@ export type WorkOrderSummary = {
   /** Computed by the list endpoint: WO is past its stage's stuck
    *  threshold (same definition the dashboard uses). */
   is_stuck: boolean
+  /** Turnaround deadline, computed by the backend (scheduled_date, else
+   *  call_date + 5d) — same definitions as the `?deadline=` filter and
+   *  the dashboard's Deadline watch. All null once work is complete.
+   *  `deadline_days_past` is signed: positive = overdue. */
+  deadline_date: string | null // ISO 8601
+  deadline_urgency: DeadlineUrgency | null
+  deadline_days_past: number | null
   // SC invoice state synced from webhooks (for the post-submit tabs).
   sc_invoice_number: string | null
   sc_invoice_status: string | null
@@ -214,6 +221,11 @@ export type WorkOrderDetail = {
   suggested_markup_percent: string | null
   suggested_markup_label: string | null
 
+  /** Turnaround deadline — same computed fields as WorkOrderSummary. */
+  deadline_date: string | null // ISO 8601
+  deadline_urgency: DeadlineUrgency | null
+  deadline_days_past: number | null
+
   // ServiceChannel invoice state, synced from SC invoice webhooks.
   sc_invoice_id: number | null
   sc_invoice_number: string | null
@@ -231,6 +243,18 @@ export type WorkOrderDetail = {
   last_synced_at: string
   created_at: string
   updated_at: string
+}
+
+/** Backend-computed turnaround urgency (`app/services/deadlines.py`). */
+export type DeadlineUrgency = 'overdue' | 'due_soon' | 'ok'
+
+/** `?deadline=` filter vocabulary. at_risk = overdue + due_soon. */
+export type DeadlineFilterKey = 'at_risk' | 'overdue' | 'due_soon'
+
+export const DEADLINE_FILTER_LABELS: Record<DeadlineFilterKey, string> = {
+  at_risk: 'At-risk turnaround',
+  overdue: 'Past turnaround deadline',
+  due_soon: 'Turnaround due soon',
 }
 
 export type InvoiceTab =
@@ -344,6 +368,9 @@ export type WorkOrderListParams = {
   invoice_tab?: InvoiceTab
   /** Only WOs stuck past their stage's age threshold. */
   stuck?: boolean
+  /** Turnaround-deadline filter over unfinished WOs — same definitions
+   *  as the dashboard's Deadline watch panel. */
+  deadline?: DeadlineFilterKey
   /** Only WOs whose category is AI-suggested and not yet confirmed
    *  (brenk_category_source = 'ai'). Drives the "Needs review" toggle. */
   category_review?: boolean
@@ -571,12 +598,24 @@ export type MoneyStats = {
   month_label: string
 }
 
+/** Turnaround-deadline counts for the Deadline watch panel. Counts use
+ *  the same backend definitions as the `?deadline=` list filter, so a
+ *  count always equals the row total of the list it links to. */
+export type DeadlineWatch = {
+  overdue_count: number
+  due_soon_count: number
+  needs_action_count: number
+  waiting_on_cubesmart_count: number
+  due_soon_window_days: number
+}
+
 export type DashboardPipeline = {
   stages: PipelineStage[]
   stuck: StuckWorkOrder[]
   total_open: number
   total_invoiced: number
   money: MoneyStats
+  deadline_watch: DeadlineWatch
 }
 
 // =============================================================================

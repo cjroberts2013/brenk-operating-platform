@@ -5,11 +5,15 @@ with ServiceChannel. Task bodies are thin wrappers — real logic lives in
 `app.services.sync`.
 """
 
+from datetime import UTC, datetime
+
 import structlog
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.services.categorize import categorize_uncategorized
+from app.services.deadline_digest import build_digest_email, fetch_digest_items
+from app.services.email import send_email
 from app.services.invoice_sync import process_event, process_pending_events
 from app.services.servicechannel.client import ServiceChannelClient
 from app.services.sync.notes import sync_notes_for_sc_work_order_id
@@ -112,6 +116,49 @@ async def categorize_work_orders(timestamp: int) -> dict:
     logger.info("categorize_work_orders tick", timestamp=timestamp)
     async with AsyncSessionLocal() as session:
         return await categorize_uncategorized(session)
+
+
+@procrastinate_app.periodic(cron="0 12 * * *")
+@procrastinate_app.task(name="send_deadline_digest", queue="default")
+async def send_deadline_digest(timestamp: int) -> dict:
+    """Email Daryl the daily turnaround-deadline digest.
+
+    Cron is UTC: 12:00 = 7am CDT / 6am CST — before Daryl's day starts
+    either way. (Bump to "0 13 * * *" for 8am/7am if the winter hour is
+    too early.) Sends only when at least one WO is overdue or due within
+    the due-soon window; quiet mornings send nothing. Re-deferring the
+    task manually just re-sends the current digest — that's the manual
+    re-send you'd want, so there's no last-sent guard. Without
+    RESEND_API_KEY, send_email logs and no-ops.
+
+    `timestamp` is the Procrastinate scheduled tick (used for logging).
+    """
+    logger.info("send_deadline_digest tick", timestamp=timestamp)
+    settings = get_settings()
+    async with AsyncSessionLocal() as session:
+        items = await fetch_digest_items(session)
+
+    if not items:
+        logger.info("deadline digest empty — not sending")
+        return {"sent": False, "items": 0}
+
+    subject, html, text = build_digest_email(items, datetime.now(UTC))
+    sent = await send_email(
+        subject=subject,
+        html=html,
+        text=text,
+        to=settings.REMINDER_TO_EMAIL or settings.QUOTE_TO_EMAIL,
+        from_email=settings.QUOTE_FROM_EMAIL,
+    )
+    counts = {
+        "sent": sent,
+        "items": len(items),
+        "overdue": sum(1 for i in items if i.urgency == "overdue"),
+        "due_soon": sum(1 for i in items if i.urgency == "due_soon"),
+        "waiting_on_cubesmart": sum(1 for i in items if i.section == "waiting_on_cubesmart"),
+    }
+    logger.info("deadline digest processed", **counts)
+    return counts
 
 
 @procrastinate_app.task(name="sync_vendors", queue="default")

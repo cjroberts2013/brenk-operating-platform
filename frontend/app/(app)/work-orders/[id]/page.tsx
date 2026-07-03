@@ -10,6 +10,7 @@ import {
 import { AttachmentsSection } from '@/components/work-orders/AttachmentsSection'
 import { CategoryControl } from '@/components/work-orders/CategoryControl'
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
+import { DeadlineBadge } from '@/components/work-orders/DeadlineBadge'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkPaidControl } from '@/components/work-orders/MarkPaidControl'
 import { MarkupHelper } from '@/components/work-orders/MarkupHelper'
@@ -209,10 +210,16 @@ export default async function WorkOrderDetailPage({
 
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-2">
-          <StatusBadge
-            status={wo.primary_status}
-            extended={wo.extended_status}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge
+              status={wo.primary_status}
+              extended={wo.extended_status}
+            />
+            <DeadlineBadge
+              urgency={wo.deadline_urgency}
+              daysPast={wo.deadline_days_past}
+            />
+          </div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
             Work Order #{wo.sc_number}
           </h1>

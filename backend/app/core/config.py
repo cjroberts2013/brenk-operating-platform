@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # Used to verify inbound webhook HMAC signatures. Empty until set;
     # an empty key makes every signature fail closed (see sc_webhook.py).
     SC_WEBHOOK_SIGNING_KEY: str = ""
+    # Human-facing SC web portal, for deep links in emails. Must match the
+    # frontend's NEXT_PUBLIC_SC_WEB_URL per environment (the prod host is
+    # www.servicechannel.com — sc.servicechannel.com is dead, see CLAUDE.md).
+    SC_SANDBOX_WEB_URL: str = "https://sb2.servicechannel.com"
+    SC_PRODUCTION_WEB_URL: str = "https://www.servicechannel.com"
 
     @computed_field
     @property
@@ -80,6 +85,16 @@ class Settings(BaseSettings):
             self.SC_PRODUCTION_API_URL
             if self.SC_ENVIRONMENT == "production"
             else self.SC_SANDBOX_API_URL
+        )
+
+    @computed_field
+    @property
+    def SC_WEB_URL(self) -> str:  # noqa: N802 - settings field naming, mirrors the SC_* env vars
+        """Active human-facing SC portal URL based on environment."""
+        return (
+            self.SC_PRODUCTION_WEB_URL
+            if self.SC_ENVIRONMENT == "production"
+            else self.SC_SANDBOX_WEB_URL
         )
 
     # -------------------------------------------------------------------------
@@ -117,6 +132,15 @@ class Settings(BaseSettings):
     # no extra Resend setup needed) but a dedicated mailbox so vendors see a
     # purpose-built "from".
     VENDOR_FROM_EMAIL: str = "Brenk Facility Services <workorder@brenkfacilityservices.com>"
+    # Recipient for the daily turnaround-deadline digest. Empty means
+    # "fall back to QUOTE_TO_EMAIL" at the call site.
+    REMINDER_TO_EMAIL: str = ""
+
+    # -------------------------------------------------------------------------
+    # Dashboard — public base URL of the authenticated frontend, used to
+    # build "open this WO" links in outbound emails.
+    # -------------------------------------------------------------------------
+    DASHBOARD_BASE_URL: str = "https://app.brenkfacilityservices.com"
 
     # -------------------------------------------------------------------------
     # Observability

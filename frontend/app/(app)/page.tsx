@@ -1,3 +1,4 @@
+import { DeadlineWatchPanel } from '@/components/dashboard/DeadlineWatchPanel'
 import { MoneyStatsBand } from '@/components/dashboard/MoneyStatsBand'
 import { PipelineStageTile } from '@/components/dashboard/PipelineStageTile'
 import { StuckPanel } from '@/components/dashboard/StuckPanel'
@@ -32,6 +33,11 @@ export default async function DashboardPage() {
             <PipelineStageTile key={stage.key} stage={stage} />
           ))}
         </div>
+      </section>
+
+      {/* Deadline watch — CubeSmart's 3-5 day turnaround promise. */}
+      <section>
+        <DeadlineWatchPanel watch={data.deadline_watch} />
       </section>
 
       {/* Stuck right now — the operational reason this page exists. */}

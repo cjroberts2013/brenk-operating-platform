@@ -43,6 +43,22 @@ class StuckWorkOrder(BaseModel):
     sc_updated_date: datetime | None
 
 
+class DeadlineWatch(BaseModel):
+    """Turnaround-deadline counts for the Deadline watch panel.
+
+    Same definitions as the WO list's `?deadline=` filter (see
+    app.services.deadlines), so each count equals the row count of the
+    list it links to. The section counts split at_risk (= overdue +
+    due_soon) by who owes the next move.
+    """
+
+    overdue_count: int
+    due_soon_count: int
+    needs_action_count: int
+    waiting_on_cubesmart_count: int
+    due_soon_window_days: int
+
+
 class DashboardPipeline(BaseModel):
     """The full dashboard payload — stage tiles + the stuck list."""
 
@@ -51,3 +67,4 @@ class DashboardPipeline(BaseModel):
     total_open: int  # all non-terminal, non-invoiced WOs
     total_invoiced: int
     money: MoneyStats
+    deadline_watch: DeadlineWatch

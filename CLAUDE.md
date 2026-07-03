@@ -352,6 +352,50 @@ stays public and the dashboard stays locked.
   tab will error and attachments/vendor-message stay inert (both degrade
   gracefully on the WO detail).
 
+**Completed (2026-07-03, dev — NOT yet deployed to prod): CubeSmart
+turnaround-deadline reminders.**
+- **Insight that shaped the design:** SC already encodes CubeSmart's 3-5
+  day turnaround — `scheduled_date` = `call_date + 3-5d` on nearly every
+  WO and SC rewrites it on legit reschedules. So the deadline is fully
+  derived (no manual tagging, **no migration**): `scheduled_date`, else
+  `call_date + 5d`. The "waiting for proposal" status Daryl worries about
+  is spelled `WAITING FOR QUOTE` in prod; `WAITING FOR APPROVAL` means
+  blocked on CubeSmart (proposal sent).
+- **`app/services/deadlines.py`** — single source of truth (pipeline.py
+  pattern): urgency buckets (overdue / due_soon ≤2d / ok over OPEN +
+  IN PROGRESS), needs_action vs waiting_on_cubesmart section split, and
+  matching SQL clauses (`?deadline=at_risk|overdue|due_soon`).
+- **Daily digest email to Daryl** (`app/services/deadline_digest.py` +
+  `send_deadline_digest` worker task, cron `0 12 * * *` UTC = 7am CDT):
+  two sections (Needs your action / Waiting on CubeSmart), each row =
+  WO # linked to the dashboard + location + status + "Overdue Nd" + SC
+  deep link; 25 rows/section cap with "+N more"; skips sending when
+  nothing is at risk. New settings: `DASHBOARD_BASE_URL`, `SC_WEB_URL`
+  (computed from `SC_ENVIRONMENT`; prod host www.servicechannel.com),
+  `REMINDER_TO_EMAIL` (empty = falls back to `QUOTE_TO_EMAIL`).
+- **API:** `?deadline=` filter on the WO list + computed
+  `deadline_date/urgency/days_past` on Summary + Detail;
+  `deadline_watch` counts in `/dashboard/pipeline` (counts equal the
+  filtered-list totals by construction — integration-tested).
+- **Frontend:** red/amber `DeadlineBadge` on WO list rows + detail
+  header, "Deadline watch" banner on the dashboard home linking to the
+  filtered list, `?deadline=` filter chip on /work-orders.
+- 247 backend tests pass (27 new). **Deploy notes:** deploy BOTH Fly
+  apps (the digest cron registers in the worker); verify
+  `RESEND_API_KEY` is set on `brenk-platform-worker` (only the web app
+  sent email before) and `SC_ENVIRONMENT=production` there; no
+  migration; no new Vercel env.
+- **Verification period (requested 2026-07-03): digest goes to Charles
+  first.** `fly secrets set REMINDER_TO_EMAIL=cjroberts2013@gmail.com
+  -a brenk-platform-worker` at deploy time so Charles can vet the
+  digest before Daryl sees it; once trusted, `fly secrets unset
+  REMINDER_TO_EMAIL -a brenk-platform-worker` to fall back to
+  `QUOTE_TO_EMAIL` (Daryl). Dev `.env` already sets it to Charles.
+  When it does cut over, warn Daryl the first digest inventories the
+  ~25-WO overdue backlog (some months old). If daily repeats of stale
+  WOs annoy him, the agreed v2 is a `brenk_deadline_muted_at` snooze
+  column.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)

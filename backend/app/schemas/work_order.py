@@ -188,6 +188,15 @@ class WorkOrderSummary(_OrmModel):
     # after model_validate.
     is_stuck: bool = False
 
+    # Turnaround deadline, computed by the endpoint from
+    # app.services.deadlines (scheduled_date, else call_date + 5d) so
+    # the frontend badge never re-derives the logic. All None for WOs
+    # whose work is already complete (the clock has stopped).
+    # `deadline_days_past` is signed: positive = overdue.
+    deadline_date: datetime | None = None
+    deadline_urgency: str | None = None  # 'overdue' | 'due_soon' | 'ok'
+    deadline_days_past: float | None = None
+
     # ServiceChannel invoice state, synced from SC webhooks. Lets the
     # invoice queue show the real invoice number / status / billed total
     # inline on the post-submit tabs.
@@ -277,6 +286,12 @@ class WorkOrderDetail(_OrmModel):
     # the detail endpoint; `*_label` explains the basis for the UI.
     suggested_markup_percent: Decimal | None = None
     suggested_markup_label: str | None = None
+
+    # Turnaround deadline, computed by the endpoint (see the same fields
+    # on WorkOrderSummary). All None once the work is complete.
+    deadline_date: datetime | None = None
+    deadline_urgency: str | None = None  # 'overdue' | 'due_soon' | 'ok'
+    deadline_days_past: float | None = None
 
     # ServiceChannel invoice state, synced from SC invoice webhooks.
     sc_invoice_id: int | None

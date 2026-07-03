@@ -44,6 +44,13 @@ from app.schemas.work_order import (
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
+from app.services.deadlines import (
+    classify_urgency,
+    days_past_deadline,
+    deadline_filter_clauses,
+    deadline_for,
+    is_at_risk_status,
+)
 from app.services.email import is_valid_email, send_email
 from app.services.invoice_submit import (
     InvoiceSubmitError,
@@ -170,6 +177,23 @@ _MAX_PAGE_SIZE = 200
 _ACTIVE_INVOICE_STATUSES = ["Open", "Approved", "On Hold", "Reviewed", "Disputed"]
 
 
+def _apply_deadline_fields(
+    target: WorkOrderSummary | WorkOrderDetail, wo: WorkOrder, now: datetime
+) -> None:
+    """Stamp the computed turnaround-deadline fields onto a validated
+    schema, using the same definitions as the ?deadline= filter and the
+    dashboard's Deadline watch counts. No-op (fields stay None) once
+    the work is complete — the turnaround clock has stopped."""
+    if not is_at_risk_status(wo.primary_status):
+        return
+    dl = deadline_for(wo.scheduled_date, wo.call_date)
+    if dl is None:
+        return
+    target.deadline_date = dl
+    target.deadline_urgency = classify_urgency(dl, now)
+    target.deadline_days_past = days_past_deadline(dl, now)
+
+
 @router.get("/", response_model=WorkOrderListResponse)
 async def list_work_orders(
     db: Annotated[AsyncSession, Depends(get_async_db)],
@@ -232,6 +256,18 @@ async def list_work_orders(
             ),
         ),
     ] = False,
+    deadline: Annotated[
+        Literal["at_risk", "overdue", "due_soon"] | None,
+        Query(
+            description=(
+                "Turnaround-deadline filter over unfinished WOs (OPEN / IN "
+                "PROGRESS). The deadline is scheduled_date, falling back to "
+                "call_date + 5 days. overdue: past deadline. due_soon: due "
+                "within the due-soon window. at_risk: either. Same "
+                "definitions as the dashboard's Deadline watch panel."
+            ),
+        ),
+    ] = None,
     category_review: Annotated[
         bool,
         Query(
@@ -355,6 +391,11 @@ async def list_work_orders(
     if stuck:
         filters.append(stuck_filter_clause())
 
+    # Deadline filter: unfinished WOs past / nearing their turnaround
+    # deadline. Same clauses as the dashboard's Deadline watch counts.
+    if deadline is not None:
+        filters.extend(deadline_filter_clauses(deadline))
+
     # Category-review filter: AI-suggested categories the operator hasn't
     # confirmed or overridden yet (source stays 'ai' until they act).
     if category_review:
@@ -411,6 +452,7 @@ async def list_work_orders(
     stmt = _apply_filters(stmt)
     rows = (await db.execute(stmt)).scalars().all()
 
+    now = datetime.now(UTC)
     items: list[WorkOrderSummary] = []
     for row in rows:
         summary = WorkOrderSummary.model_validate(row)
@@ -422,6 +464,7 @@ async def list_work_orders(
             row.assigned_vendor_id is not None,
         )
         summary.is_stuck = is_stuck(stage_key, row.sc_updated_date) if stage_key else False
+        _apply_deadline_fields(summary, row, now)
         items.append(summary)
 
     return WorkOrderListResponse(
@@ -820,6 +863,7 @@ async def _to_detail(db: AsyncSession, wo: WorkOrder) -> WorkOrderDetail:
     detail.suggested_markup_percent, detail.suggested_markup_label = await _markup_suggestion(
         db, wo
     )
+    _apply_deadline_fields(detail, wo, datetime.now(UTC))
     if wo.sc_work_order_id is not None:
         invoices = (
             (
