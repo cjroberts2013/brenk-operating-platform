@@ -187,6 +187,42 @@ async def test_pricing_rollup_paid_and_payables(
     assert Decimal(owed[_ids["v2"]]["payout"]) == Decimal("50")
 
 
+async def test_remove_assignment_resyncs_cost_rollup(
+    client: httpx.AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    from decimal import Decimal
+
+    wo = _ids["wo"]
+    base = f"/api/v1/work-orders/{wo}/assignments"
+    await client.post(base, headers=auth_headers, json={"vendor_id": _ids["v1"]})
+    await client.post(base, headers=auth_headers, json={"vendor_id": _ids["v2"]})
+    await client.put(
+        f"/api/v1/work-orders/{wo}/pricing",
+        headers=auth_headers,
+        json={
+            "costs": [
+                {"vendor_id": _ids["v1"], "labor_cost": "100", "material_cost": "20"},
+                {"vendor_id": _ids["v2"], "labor_cost": "50", "material_cost": "5"},
+            ]
+        },
+    )
+
+    # Unassign v1 -> the WO-level rollup drops v1's payout immediately.
+    r = await client.delete(f"{base}/{_ids['v1']}", headers=auth_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert Decimal(body["brenk_labor_cost"]) == Decimal("50")
+    assert Decimal(body["brenk_material_cost"]) == Decimal("5")
+
+    # Unassign the last costed vendor -> the rollup clears rather than
+    # leaving their payout on the WO.
+    r = await client.delete(f"{base}/{_ids['v2']}", headers=auth_headers)
+    body = r.json()
+    assert body["vendor_assignments"] == []
+    assert body["brenk_labor_cost"] is None
+    assert body["brenk_material_cost"] is None
+
+
 async def test_bad_vendor_and_missing(
     client: httpx.AsyncClient, auth_headers: dict[str, str]
 ) -> None:
@@ -196,6 +232,8 @@ async def test_bad_vendor_and_missing(
     )
     assert r.status_code == 400
     r = await client.post(
-        "/api/v1/work-orders/2000000999/assignments", headers=auth_headers, json={"vendor_id": _ids["v1"]}
+        "/api/v1/work-orders/2000000999/assignments",
+        headers=auth_headers,
+        json={"vendor_id": _ids["v1"]},
     )
     assert r.status_code == 404

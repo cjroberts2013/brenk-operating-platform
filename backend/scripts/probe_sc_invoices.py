@@ -158,16 +158,24 @@ async def main() -> None:
         print("\n        Interpretation:")
         if err is None:
             print("        - Got a 2xx. We HAVE write scope (and SC accepted a bogus WO?!).")
-        elif isinstance(err, str) and ("401" in err or "security permission" in err.lower() or "504" in err):
-            print("        - Permission/scope error => NO write scope. Phase 1.5 push still BLOCKED.")
+        elif isinstance(err, str) and (
+            "401" in err or "security permission" in err.lower() or "504" in err
+        ):
+            print(
+                "        - Permission/scope error => NO write scope. Phase 1.5 push still BLOCKED."
+            )
         elif isinstance(err, str) and any(c in err for c in ("400", "404", "422")):
-            print("        - Content/validation error => we DO have write scope; only the payload was bad.")
+            print(
+                "        - Content/validation error => we DO have write scope; only the payload was bad."
+            )
             print("          Phase 1.5 invoice push is UNBLOCKED on the auth side.")
         else:
             print(f"        - Inconclusive: {err}")
     else:
         print("\n[5] POST /v3/invoices write-scope check skipped.")
-        print("    Re-run with the `post` arg to test write scope (uses a bogus WO, creates nothing):")
+        print(
+            "    Re-run with the `post` arg to test write scope (uses a bogus WO, creates nothing):"
+        )
         print(f"      python scripts/probe_sc_invoices.py {env_arg} {subscriber_id} post")
 
     print("\n=== done ===\n")

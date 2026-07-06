@@ -6,7 +6,7 @@ work description, and the attached photos. One body that pastes cleanly
 into SMS or email, plus a suggested email subject.
 
 This is the single source of truth for the message shape — Phase 3
-auto-send (Twilio/Resend) will compose from here too.
+auto-send (Twilio/Resend) composes from here too.
 
 Deliberately EXCLUDED from the vendor-facing body:
 - NTE — the client-side ceiling; never anchor the vendor's price to it.
@@ -22,7 +22,15 @@ from typing import Any
 from app.models.work_order import GateCode, Vendor, WorkOrder
 from app.services.addresses import format_address
 
-_SIGNOFF = "Please confirm you can take this and your ETA. Thanks!\n— Brenk Facility Services"
+# Daryl's cell — vendors reply to a Twilio/Resend address that no human
+# reads yet, so the message itself must carry a real callback number.
+# Declared as "phone numbers" content on the A2P 10DLC campaign.
+_DARYL_PHONE = "(512) 369-2719"
+
+_SIGNOFF = (
+    f"Please confirm you can take this and your ETA — or call Daryl at {_DARYL_PHONE} "
+    "with any questions. Thanks!\n— Brenk Facility Services"
+)
 
 # Cap total photo bytes attached to one email. Resend allows ~40 MB; stay
 # well under so a big photo set degrades to "no attachments" rather than a
@@ -70,15 +78,23 @@ def problem_summary(description: str | None) -> str:
     return last or text
 
 
-def _photos_line(attachments: list[dict[str, Any]]) -> str:
-    if not attachments:
-        return "Photos: none"
-    names = [a.get("Name") for a in attachments if a.get("Name")]
+def _photos_line(attachments: list[dict[str, Any]], photos_unavailable: int = 0) -> str:
     count = len(attachments)
+    if not count and not photos_unavailable:
+        return "Photos: none"
+    if not count:
+        noun = "photo" if photos_unavailable == 1 else "photos"
+        return (
+            f"Photos: {photos_unavailable} {noun} on file — couldn't attach, available on request"
+        )
+    names = [a.get("Name") for a in attachments if a.get("Name")]
     noun = "photo" if count == 1 else "photos"
+    line = f"Photos: {count} {noun} attached"
     if names:
-        return f"Photos: {count} {noun} attached — {', '.join(names)}"
-    return f"Photos: {count} {noun} attached"
+        line += f" — {', '.join(names)}"
+    if photos_unavailable:
+        line += f" ({photos_unavailable} more couldn't be attached — available on request)"
+    return line
 
 
 def compose_vendor_message(
@@ -91,8 +107,14 @@ def compose_vendor_message(
     active_gate_codes: list[GateCode],
     attachments: list[dict[str, Any]],
     vendor: Vendor | None,
+    photos_unavailable: int = 0,
 ) -> ComposedMessage:
-    """Build the (subject, body) for the vendor notification message."""
+    """Build the (subject, body) for the vendor notification message.
+
+    `attachments` should be the photos that will actually ride along with the
+    message; pass `photos_unavailable` for ones that exist in SC but couldn't
+    be fetched/attached, so the body never claims photos the vendor won't get.
+    """
     location_bits = " — ".join(p for p in [store_id, location_name] if p) or "(location TBD)"
     address = format_address(location_raw_data)
     description = problem_summary(wo.description)
@@ -109,7 +131,7 @@ def compose_vendor_message(
     if trade_name:
         lines.append(f"Trade: {trade_name}")
     lines.append(f"Problem: {description}")
-    lines.append(_photos_line(attachments))
+    lines.append(_photos_line(attachments, photos_unavailable))
     lines.append("")
     lines.append(_SIGNOFF)
 

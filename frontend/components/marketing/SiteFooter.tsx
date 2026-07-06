@@ -57,6 +57,14 @@ export function SiteFooter({
             {copyright ??
               '© 2026 Brenk Facility Services. Licensed · Bonded · Insured.'}
           </span>
+          <span className="flex gap-5">
+            <a href="/privacy" className="hover:text-white">
+              Privacy Policy
+            </a>
+            <a href="/sms-terms" className="hover:text-white">
+              SMS Terms
+            </a>
+          </span>
         </div>
       </div>
     </footer>

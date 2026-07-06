@@ -28,7 +28,7 @@ and live outside the pipeline — they don't appear as a stage.
 **Dispatched + Vendor-assigned are merged** (2026-05-21). In Daryl's
 current workflow, accepting an SC dispatch and texting a sub-vendor
 happen in the same sitting — splitting them as separate tiles created
-a "stage" Daryl never operationally occupies. When we add Twilio in
+a "stage" Daryl never operationally occupies. When we add Twilio auto-texting in
 Phase 3 ("vendor notified" becomes a meaningful timestamp distinct
 from "vendor assigned"), we can re-introduce the split.
 

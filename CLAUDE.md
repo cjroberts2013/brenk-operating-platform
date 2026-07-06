@@ -396,6 +396,67 @@ turnaround-deadline reminders.**
   WOs annoy him, the agreed v2 is a `brenk_deadline_muted_at` snooze
   column.
 
+**Completed (2026-07-05, dev — NOT yet deployed to prod): vendor
+messaging round-out (unassign fixes, truthful photo attach, Twilio SMS).**
+- **Unassign already existed** (the ✕ on each vendor chip in
+  `VendorAssignmentControl`, `DELETE /work-orders/{id}/assignments/{vendor_id}`,
+  shipped with multi-vendor) — but two real consistency bugs were found and
+  fixed: (1) `remove_assignment` never re-ran the cost rollup, so
+  unassigning a vendor with recorded payouts left their labor/material sum
+  on the WO (now resyncs; clears when the last costed vendor is removed);
+  (2) `send-vendor-email` stamped `wo.brenk_vendor_notified_at` directly
+  instead of the junction row's `notified_at`, so the next assignment op's
+  `_resync_primary` silently wiped the notified stamp (now stamps the
+  assignment row first, WO field only as legacy fallback).
+- **Photo-attach diagnosis: sandbox blobs are GONE.** Every SC sandbox
+  attachment `Uri` now 404s (`BlobNotFound`) even though the OData listing
+  works — so in dev the vendor email always silently degraded to
+  "no photos" while the body still claimed "Photos: N attached — IMG…".
+  (Verified with curl; not an httpx bug. Prod presumably still serves
+  blobs — spot-check after deploy.) Fixes: `send_vendor_email` now fetches
+  bytes BEFORE composing and the body only claims what actually attached
+  ("N more couldn't be attached — available on request" otherwise); the
+  `attachments_count > 0` gate dropped (stale between hourly syncs) in
+  favor of always asking SC (best-effort).
+- **Twilio SMS/MMS integration** (briefly swapped to Telnyx mid-session
+  over Twilio account friction, then back once Charles's Twilio account
+  worked; for the record: Telnyx signup requires a business email — an
+  @brenkfacilityservices.com mailbox such as daryl@ passes their gate).
+  `app/services/sms.py` (no SDK — one form-encoded httpx POST, mirrors
+  `email.py`'s degrade-gracefully design; `normalize_phone` → E.164,
+  US-centric), settings `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` /
+  `TWILIO_FROM_NUMBER`. `POST /work-orders/{id}/send-vendor-sms` mirrors
+  the email endpoint: photos ride along as MMS `MediaUrl`s — each
+  presigned SC link is pre-verified fetchable (a dead blob would fail the
+  whole message after we reported success) and filtered to carrier-safe
+  image types within MMS caps (10 media / ~4.5 MB); body composed from
+  what actually attached; stamps the assignment notified.
+  `MessageVendorCard` gained a "Send text" review-and-confirm flow
+  sharing the email dialog; the manual `sms:` link remains as "Text
+  manually" fallback. The provider is isolated in `sms.py` behind
+  `send_sms(to, body, media_urls)` — swapping providers is a one-file
+  change. httpx gotcha captured in tests: `data=` must be a dict (list
+  value → repeated form field), NOT a list of tuples (silently treated
+  as a raw byte stream).
+- **A2P 10DLC compliance pages** (for the Twilio campaign registration):
+  public `/privacy` + `/sms-terms` on the storefront (static copy in
+  `app/marketing/{privacy,sms-terms}/page.tsx`, added to
+  `STOREFRONT_ROUTES` in proxy.ts, linked from the footer bottom bar).
+  Privacy page carries the three clauses carrier review requires:
+  numbers never shared for marketing, 0-5 msgs/week frequency,
+  "message and data rates may apply". Campaign registration declares
+  "phone numbers" message content, so the composed vendor message
+  signoff now includes "or call Daryl at (512) 369-2719 with any
+  questions" (`_DARYL_PHONE` in vendor_message.py) — vendors otherwise
+  have no human callback since replies to the Twilio number go nowhere.
+- 27 new/updated tests (unit sms + integration). **Deploy notes:** backend
+  `fly deploy` (web only needs it; no migration) + `fly secrets set
+  TWILIO_ACCOUNT_SID=… TWILIO_AUTH_TOKEN=… TWILIO_FROM_NUMBER=…
+  -a brenk-platform-web`; frontend via git push. US A2P 10DLC registration
+  (or verified toll-free) required in the Twilio console before carriers
+  reliably deliver — unregistered traffic gets filtered; that requirement
+  is carrier-side and provider-agnostic.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)

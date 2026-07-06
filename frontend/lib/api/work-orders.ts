@@ -130,6 +130,20 @@ export function sendVendorEmail(id: number): Promise<VendorEmailResult> {
   )
 }
 
+export type VendorSmsResult = {
+  sent: boolean
+  to_phone: string
+  photos_attached: number
+  photos_total: number
+}
+
+export function sendVendorSms(id: number): Promise<VendorSmsResult> {
+  return apiFetch<VendorSmsResult>(
+    `/api/v1/work-orders/${id}/send-vendor-sms`,
+    { method: 'POST' },
+  )
+}
+
 export function getWorkOrderSyncStatus(): Promise<WorkOrderSyncStatus> {
   return apiFetch<WorkOrderSyncStatus>('/api/v1/work-orders/sync-status')
 }

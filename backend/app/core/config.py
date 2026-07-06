@@ -137,6 +137,17 @@ class Settings(BaseSettings):
     REMINDER_TO_EMAIL: str = ""
 
     # -------------------------------------------------------------------------
+    # SMS (Twilio) — powers vendor work-order notification texts. When the
+    # credentials are empty, `send_sms` logs a warning and returns False
+    # (the endpoint surfaces a "not configured" error) — same graceful
+    # degradation as Resend. TWILIO_FROM_NUMBER is the purchased Twilio
+    # number in E.164 form (e.g. +15125551234).
+    # -------------------------------------------------------------------------
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
+
+    # -------------------------------------------------------------------------
     # Dashboard — public base URL of the authenticated frontend, used to
     # build "open this WO" links in outbound emails.
     # -------------------------------------------------------------------------

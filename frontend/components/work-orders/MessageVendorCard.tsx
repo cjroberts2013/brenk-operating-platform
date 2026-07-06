@@ -17,15 +17,25 @@ import {
   PaperAirplaneIcon,
 } from '@heroicons/react/20/solid'
 
-import { sendVendorEmailAction } from '@/app/(app)/work-orders/actions'
-import type { VendorEmailResult } from '@/lib/api/work-orders'
+import {
+  sendVendorEmailAction,
+  sendVendorSmsAction,
+} from '@/app/(app)/work-orders/actions'
+import type { VendorEmailResult, VendorSmsResult } from '@/lib/api/work-orders'
 import type { VendorMessage, WorkOrderAttachment } from '@/lib/api/types'
 
+type SendMode = 'email' | 'sms'
+
+type SendResult =
+  | { kind: 'email'; to: string; photos_attached: number; photos_total: number }
+  | { kind: 'sms'; to: string; photos_attached: number; photos_total: number }
+
 /**
- * "Message vendor" card. Email always goes through Resend (from the business
- * address, photos attached, reply-to Daryl) behind a review-and-confirm
- * dialog — never the device mail client. Texting stays a prefilled sms: link
- * for now (no Twilio yet). Copy is always available.
+ * "Message vendor" card. Email goes through Resend (from the business
+ * address, photos attached, reply-to Daryl); text goes through Twilio
+ * (photos as MMS). Both sit behind the same review-and-confirm dialog and
+ * stamp the vendor notified. A manual sms: link + copy stay available as
+ * fallbacks (e.g. Twilio not configured yet).
  */
 export function MessageVendorCard({
   workOrderId,
@@ -38,12 +48,13 @@ export function MessageVendorCard({
 }) {
   const router = useRouter()
   const [copied, setCopied] = useState(false)
-  const [open, setOpen] = useState(false)
-  const [result, setResult] = useState<VendorEmailResult | null>(null)
+  const [mode, setMode] = useState<SendMode | null>(null)
+  const [result, setResult] = useState<SendResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
   const hasEmail = !!message.to_email
+  const hasPhone = !!message.to_phone
   const prefLabel = formatPreference(message.contact_preference)
   const smsHref = message.to_phone
     ? `sms:${message.to_phone}?&body=${encodeURIComponent(message.body)}`
@@ -59,17 +70,38 @@ export function MessageVendorCard({
     }
   }
 
-  function send() {
+  function send(kind: SendMode) {
     setError(null)
     startTransition(async () => {
-      const res = await sendVendorEmailAction(workOrderId)
-      if (res.error) {
-        setError(res.error)
+      if (kind === 'email') {
+        const res = await sendVendorEmailAction(workOrderId)
+        if (res.error) {
+          setError(res.error)
+          return
+        }
+        const r = res.result as VendorEmailResult
+        setResult({
+          kind: 'email',
+          to: r.to_email,
+          photos_attached: r.photos_attached,
+          photos_total: r.photos_total,
+        })
       } else {
-        setResult(res.result ?? null)
-        setOpen(false)
-        router.refresh()
+        const res = await sendVendorSmsAction(workOrderId)
+        if (res.error) {
+          setError(res.error)
+          return
+        }
+        const r = res.result as VendorSmsResult
+        setResult({
+          kind: 'sms',
+          to: r.to_phone,
+          photos_attached: r.photos_attached,
+          photos_total: r.photos_total,
+        })
       }
+      setMode(null)
+      router.refresh()
     })
   }
 
@@ -98,7 +130,7 @@ export function MessageVendorCard({
           <div className="rounded-md bg-green-50 px-3 py-2 dark:bg-green-950/40">
             <p className="flex items-center gap-1.5 text-sm text-green-700 dark:text-green-300">
               <CheckIcon className="size-4" />
-              Emailed to {result.to_email}.
+              {result.kind === 'email' ? 'Emailed to' : 'Texted to'} {result.to}.
             </p>
             {dropped > 0 ? (
               <p className="mt-1 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
@@ -119,22 +151,32 @@ export function MessageVendorCard({
             {hasEmail ? (
               <button
                 type="button"
-                onClick={() => setOpen(true)}
+                onClick={() => setMode('email')}
                 className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500"
               >
                 <PaperAirplaneIcon className="size-4" />
                 Send email
               </button>
             ) : null}
+            {hasPhone ? (
+              <button
+                type="button"
+                onClick={() => setMode('sms')}
+                className={
+                  'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-semibold ' +
+                  (hasEmail
+                    ? 'text-indigo-700 ring-1 ring-inset ring-indigo-300 hover:bg-indigo-50 dark:text-indigo-300 dark:ring-indigo-500/40 dark:hover:bg-indigo-500/10'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-500')
+                }
+              >
+                <ChatBubbleLeftRightIcon className="size-4" />
+                Send text
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={copy}
-              className={
-                'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-semibold ' +
-                (hasEmail
-                  ? 'text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5'
-                  : 'bg-indigo-500 text-white hover:bg-indigo-400')
-              }
+              className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-semibold text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5"
             >
               {copied ? (
                 <>
@@ -151,32 +193,31 @@ export function MessageVendorCard({
             {smsHref ? (
               <a
                 href={smsHref}
-                className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/5"
+                className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               >
-                <ChatBubbleLeftRightIcon className="size-4" />
-                Text
+                Text manually
               </a>
             ) : null}
           </div>
         )}
 
-        {error && !open ? (
+        {error && mode === null ? (
           <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
             {error}
           </p>
         ) : null}
 
-        {/* Photos. The email attaches them automatically; texting/copying
-            needs them downloaded and attached by hand. */}
+        {/* Photos. Email attaches them automatically; texting sends them as
+            MMS where the carrier allows; copying needs a manual download. */}
         {attachments.length > 0 ? (
           <div className="border-t border-gray-200 pt-3 dark:border-white/10">
             <p className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
               Photos ({attachments.length})
             </p>
             <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-              {hasEmail
-                ? 'These attach to the email automatically. To text them, download each and attach it yourself.'
-                : "Text/copy won't attach these. Download each photo, then add them to your message."}
+              {hasEmail || hasPhone
+                ? 'These attach to a sent email or text automatically. For a manual text, download each and attach it yourself.'
+                : "Copy won't attach these. Download each photo, then add them to your message."}
             </p>
             <ul className="space-y-1">
               {attachments.map((att) => (
@@ -195,7 +236,7 @@ export function MessageVendorCard({
         ) : null}
       </div>
 
-      <Dialog open={open} onClose={setOpen} className="relative z-50">
+      <Dialog open={mode !== null} onClose={() => setMode(null)} className="relative z-50">
         <DialogBackdrop
           transition
           className="fixed inset-0 bg-gray-900/60 transition-opacity data-closed:opacity-0"
@@ -207,19 +248,29 @@ export function MessageVendorCard({
           >
             <div className="border-b border-gray-200 px-5 py-4 dark:border-white/10">
               <DialogTitle className="text-base font-semibold text-gray-900 dark:text-white">
-                Email this work order to the vendor
+                {mode === 'sms'
+                  ? 'Text this work order to the vendor'
+                  : 'Email this work order to the vendor'}
               </DialogTitle>
               <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                Sends from Brenk Facility Services; replies come back to you.
+                {mode === 'sms'
+                  ? 'Sends from the Brenk Facility Services number.'
+                  : 'Sends from Brenk Facility Services; replies come back to you.'}
               </p>
             </div>
 
             <div className="space-y-3 px-5 py-4 text-sm">
-              <Row label="To">{message.to_email}</Row>
-              <Row label="Subject">{message.subject}</Row>
+              <Row label="To">
+                {mode === 'sms' ? message.to_phone : message.to_email}
+              </Row>
+              {mode === 'email' ? (
+                <Row label="Subject">{message.subject}</Row>
+              ) : null}
               <Row label="Photos">
                 {message.photo_count > 0
-                  ? `${message.photo_count} attached`
+                  ? mode === 'sms'
+                    ? `up to ${message.photo_count} as MMS`
+                    : `${message.photo_count} attached`
                   : 'none'}
               </Row>
               <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-gray-50 p-3 font-sans text-xs text-gray-700 dark:bg-white/5 dark:text-gray-300">
@@ -235,7 +286,7 @@ export function MessageVendorCard({
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-3 dark:border-white/10">
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => setMode(null)}
                 disabled={pending}
                 className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"
               >
@@ -243,12 +294,16 @@ export function MessageVendorCard({
               </button>
               <button
                 type="button"
-                onClick={send}
+                onClick={() => mode && send(mode)}
                 disabled={pending}
                 className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
               >
-                <PaperAirplaneIcon className="size-4" />
-                {pending ? 'Sending…' : 'Send email'}
+                {mode === 'sms' ? (
+                  <ChatBubbleLeftRightIcon className="size-4" />
+                ) : (
+                  <PaperAirplaneIcon className="size-4" />
+                )}
+                {pending ? 'Sending…' : mode === 'sms' ? 'Send text' : 'Send email'}
               </button>
             </div>
           </DialogPanel>

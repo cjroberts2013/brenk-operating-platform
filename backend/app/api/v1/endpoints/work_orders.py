@@ -67,6 +67,13 @@ from app.services.pipeline import (
     stuck_filter_clause,
 )
 from app.services.servicechannel.client import ServiceChannelClient
+from app.services.sms import (
+    MAX_MMS_MEDIA,
+    MAX_MMS_TOTAL_BYTES,
+    MMS_IMAGE_CONTENT_TYPES,
+    normalize_phone,
+    send_sms,
+)
 from app.services.sync.work_orders import sync_all_work_orders
 from app.services.vendor_message import (
     MAX_TOTAL_ATTACHMENT_BYTES,
@@ -687,10 +694,18 @@ async def remove_assignment(
     wo = await _fetch_work_order(db, work_order_id)
     target = next((a for a in wo.vendor_assignments if a.vendor_id == vendor_id), None)
     if target is not None:
+        target_had_costs = target.labor_cost is not None or target.material_cost is not None
         await db.delete(target)
         await db.commit()
         fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
         _resync_primary(fresh)
+        if fresh.vendor_assignments:
+            _resync_cost_rollup(fresh)
+        elif target_had_costs:
+            # The rollup came from the vendor we just removed — don't leave
+            # their payout sitting on the WO as if it were still owed.
+            fresh.brenk_labor_cost = None
+            fresh.brenk_material_cost = None
         await db.commit()
     fresh = await _fetch_work_order(db, work_order_id, populate_existing=True)
     return await _to_detail(db, fresh)
@@ -1229,6 +1244,63 @@ async def download_work_order_attachment(
     )
 
 
+async def _list_sc_attachments(wo: WorkOrder) -> list[dict]:
+    """List the WO's SC attachments (Uri + Name), best-effort.
+
+    Always asks SC rather than gating on `attachments_count` — the synced
+    count can be stale between hourly syncs (photos added after the last
+    sync would otherwise silently never attach). Any SC hiccup returns []
+    so the message still composes/sends, just without photos.
+    """
+    try:
+        return await ServiceChannelClient().get_work_order_attachments(wo.sc_work_order_id)
+    except Exception as exc:
+        logger.warning("sc_attachments_list_failed", work_order_id=wo.id, error=str(exc))
+        return []
+
+
+async def _fetch_attachment_payloads(
+    raw_attachments: list[dict],
+    max_total_bytes: int = MAX_TOTAL_ATTACHMENT_BYTES,
+) -> tuple[list[dict[str, str]], list[dict]]:
+    """Download + base64 the attachment bytes for an outbound message.
+
+    Returns (payloads for the email API, the raw SC dicts that actually
+    fetched OK) so callers can compose the body from what truly attached.
+    Capped so a huge photo set degrades to fewer attachments rather than a
+    rejected send; individual fetch failures are skipped, not fatal.
+    """
+    client = ServiceChannelClient()
+    payloads: list[dict[str, str]] = []
+    attached_raw: list[dict] = []
+    total_bytes = 0
+    for att in raw_attachments:
+        uri = att.get("Uri")
+        if not uri:
+            continue
+        try:
+            content, _ctype = await client.fetch_attachment_bytes(uri)
+        except Exception as exc:
+            logger.warning(
+                "vendor_message_attachment_fetch_failed",
+                attachment_id=att.get("Id"),
+                error=str(exc),
+            )
+            continue
+        if total_bytes + len(content) > max_total_bytes:
+            logger.warning("vendor_message_attachment_cap_reached")
+            break
+        total_bytes += len(content)
+        payloads.append(
+            {
+                "filename": _sanitize_filename(att.get("Name"), f"photo-{att.get('Id')}"),
+                "content": base64.b64encode(content).decode("ascii"),
+            }
+        )
+        attached_raw.append(att)
+    return payloads, attached_raw
+
+
 @router.get("/{work_order_id}/vendor-message", response_model=VendorMessage)
 async def get_vendor_message(
     work_order_id: int,
@@ -1243,17 +1315,7 @@ async def get_vendor_message(
     """
     wo = await _fetch_work_order(db, work_order_id)
     active_gate_codes = await _active_gate_codes(db, wo.location_id)
-
-    attachments: list[dict] = []
-    if wo.attachments_count > 0:
-        try:
-            attachments = await ServiceChannelClient().get_work_order_attachments(
-                wo.sc_work_order_id
-            )
-        except Exception as exc:
-            logger.warning(
-                "vendor_message_attachments_failed", work_order_id=work_order_id, error=str(exc)
-            )
+    attachments = await _list_sc_attachments(wo)
 
     vendor = wo.assigned_vendor
     composed = compose_vendor_message(
@@ -1320,17 +1382,10 @@ async def send_vendor_email(
 
     active_gate_codes = await _active_gate_codes(db, wo.location_id)
 
-    # Raw SC attachments (carry the Uri + Name we need to fetch the bytes).
-    raw_attachments: list[dict] = []
-    if wo.attachments_count > 0:
-        try:
-            raw_attachments = await ServiceChannelClient().get_work_order_attachments(
-                wo.sc_work_order_id
-            )
-        except Exception as exc:
-            logger.warning(
-                "vendor_email_attachments_failed", work_order_id=work_order_id, error=str(exc)
-            )
+    # Fetch the photo bytes BEFORE composing, so the body only claims the
+    # photos that will actually ride along with the email.
+    raw_attachments = await _list_sc_attachments(wo)
+    attachments_payload, attached_raw = await _fetch_attachment_payloads(raw_attachments)
 
     composed = compose_vendor_message(
         wo=wo,
@@ -1339,38 +1394,10 @@ async def send_vendor_email(
         location_raw_data=wo.location.raw_data if wo.location else None,
         trade_name=wo.trade.name if wo.trade else None,
         active_gate_codes=active_gate_codes,
-        attachments=raw_attachments,
+        attachments=attached_raw,
         vendor=vendor,
+        photos_unavailable=len(raw_attachments) - len(attached_raw),
     )
-
-    # Fetch + base64 the photo bytes, capped so a huge set degrades to
-    # fewer attachments rather than a rejected send.
-    client = ServiceChannelClient()
-    attachments_payload: list[dict[str, str]] = []
-    total_bytes = 0
-    for att in raw_attachments:
-        uri = att.get("Uri")
-        if not uri:
-            continue
-        try:
-            content, _ctype = await client.fetch_attachment_bytes(uri)
-        except Exception as exc:
-            logger.warning(
-                "vendor_email_attachment_fetch_failed",
-                attachment_id=att.get("Id"),
-                error=str(exc),
-            )
-            continue
-        if total_bytes + len(content) > MAX_TOTAL_ATTACHMENT_BYTES:
-            logger.warning("vendor_email_attachment_cap_reached", work_order_id=work_order_id)
-            break
-        total_bytes += len(content)
-        attachments_payload.append(
-            {
-                "filename": _sanitize_filename(att.get("Name"), f"photo-{att.get('Id')}"),
-                "content": base64.b64encode(content).decode("ascii"),
-            }
-        )
 
     settings = get_settings()
     sent = await send_email(
@@ -1388,7 +1415,15 @@ async def send_vendor_email(
             detail="Couldn't send the email (check the Resend configuration).",
         )
 
-    wo.brenk_vendor_notified_at = datetime.now(UTC)
+    # Stamp "notified" on the vendor's assignment row (the junction is the
+    # source of truth; _resync_primary mirrors it onto the WO). Writing only
+    # the WO field would get wiped by the next assignment op's resync.
+    assignment = next((a for a in wo.vendor_assignments if a.vendor_id == vendor.id), None)
+    if assignment is not None:
+        assignment.notified_at = datetime.now(UTC)
+        _resync_primary(wo)
+    else:
+        wo.brenk_vendor_notified_at = datetime.now(UTC)
     await db.commit()
     logger.info(
         "vendor_email_sent",
@@ -1400,5 +1435,135 @@ async def send_vendor_email(
         sent=True,
         to_email=vendor.email,
         photos_attached=len(attachments_payload),
+        photos_total=len(raw_attachments),
+    )
+
+
+async def _select_mms_media(raw_attachments: list[dict]) -> tuple[list[str], list[dict]]:
+    """Pick which SC attachments can ride along on an MMS.
+
+    Twilio fetches `MediaUrl`s itself, so we pre-verify each presigned SC
+    link actually serves bytes (a listed-but-missing blob would fail the
+    whole message after we'd already reported success), and keep only
+    carrier-safe image types within Twilio's count/size caps. Returns
+    (media urls for Twilio, the raw SC dicts that made the cut).
+    """
+    client = ServiceChannelClient()
+    media_urls: list[str] = []
+    attached_raw: list[dict] = []
+    total_bytes = 0
+    for att in raw_attachments:
+        uri = att.get("Uri")
+        if not uri:
+            continue
+        if len(media_urls) >= MAX_MMS_MEDIA:
+            logger.warning("vendor_sms_media_count_cap_reached")
+            break
+        try:
+            content, ctype = await client.fetch_attachment_bytes(uri)
+        except Exception as exc:
+            logger.warning(
+                "vendor_sms_media_fetch_failed", attachment_id=att.get("Id"), error=str(exc)
+            )
+            continue
+        base_ctype = (ctype or "").split(";")[0].strip().lower()
+        if base_ctype not in MMS_IMAGE_CONTENT_TYPES:
+            logger.info(
+                "vendor_sms_media_skipped_type",
+                attachment_id=att.get("Id"),
+                content_type=ctype,
+            )
+            continue
+        if total_bytes + len(content) > MAX_MMS_TOTAL_BYTES:
+            logger.warning("vendor_sms_media_size_cap_reached")
+            break
+        total_bytes += len(content)
+        media_urls.append(uri)
+        attached_raw.append(att)
+    return media_urls, attached_raw
+
+
+class VendorSmsResult(BaseModel):
+    """Result of POST /work-orders/{id}/send-vendor-sms."""
+
+    sent: bool
+    to_phone: str
+    photos_attached: int
+    photos_total: int
+
+
+@router.post("/{work_order_id}/send-vendor-sms", response_model=VendorSmsResult)
+async def send_vendor_sms(
+    work_order_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> VendorSmsResult:
+    """Text the composed vendor notification (photos as MMS) via Twilio.
+
+    Sends to the assigned vendor's phone with the WO's photos attached as
+    MMS media (best-effort, capped), then stamps the vendor's assignment
+    as notified. 400 if no vendor / no usable phone; 502 if Twilio
+    rejects the send or isn't configured.
+    """
+    wo = await _fetch_work_order(db, work_order_id)
+    vendor = wo.assigned_vendor
+    if vendor is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Assign a sub-vendor before texting them.",
+        )
+    to_phone = normalize_phone(vendor.phone)
+    if to_phone is None:
+        detail = (
+            f"{vendor.name} has no phone on file. Add one on the vendor record."
+            if not vendor.phone
+            else (
+                f"{vendor.name}'s phone ({vendor.phone}) doesn't look like a "
+                "textable number. Fix it on the vendor record before sending."
+            )
+        )
+        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=detail)
+
+    active_gate_codes = await _active_gate_codes(db, wo.location_id)
+
+    raw_attachments = await _list_sc_attachments(wo)
+    media_urls, attached_raw = await _select_mms_media(raw_attachments)
+
+    composed = compose_vendor_message(
+        wo=wo,
+        store_id=wo.location.store_id if wo.location else None,
+        location_name=wo.location.name if wo.location else None,
+        location_raw_data=wo.location.raw_data if wo.location else None,
+        trade_name=wo.trade.name if wo.trade else None,
+        active_gate_codes=active_gate_codes,
+        attachments=attached_raw,
+        vendor=vendor,
+        photos_unavailable=len(raw_attachments) - len(attached_raw),
+    )
+
+    sent = await send_sms(to=to_phone, body=composed.body, media_urls=media_urls)
+    if not sent:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't send the text (check the Twilio configuration).",
+        )
+
+    # Same junction-first notified stamp as the email path.
+    assignment = next((a for a in wo.vendor_assignments if a.vendor_id == vendor.id), None)
+    if assignment is not None:
+        assignment.notified_at = datetime.now(UTC)
+        _resync_primary(wo)
+    else:
+        wo.brenk_vendor_notified_at = datetime.now(UTC)
+    await db.commit()
+    logger.info(
+        "vendor_sms_sent",
+        work_order_id=work_order_id,
+        to=to_phone,
+        photos_attached=len(media_urls),
+    )
+    return VendorSmsResult(
+        sent=True,
+        to_phone=to_phone,
+        photos_attached=len(media_urls),
         photos_total=len(raw_attachments),
     )

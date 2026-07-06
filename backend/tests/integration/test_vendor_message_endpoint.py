@@ -209,6 +209,78 @@ async def test_send_vendor_email_success(harness, monkeypatch) -> None:
         assert wo.brenk_vendor_notified_at is not None
 
 
+async def test_send_vendor_email_body_never_claims_unfetchable_photos(harness, monkeypatch) -> None:
+    """SC listed a photo but its bytes 404 (e.g. expired/missing blob): the
+    email must still send, with a body that says the photo couldn't attach —
+    never '1 photo attached' for a photo the vendor won't get."""
+    ac, factory = harness
+    wo_id = await _seed(factory)
+
+    async def fake_attachments(self, sc_id):
+        return [{"Id": 1, "Name": "IMG_9872.jpeg", "Uri": "https://sc/blob?sig=x"}]
+
+    async def broken_bytes(self, uri):
+        raise RuntimeError("404 BlobNotFound")
+
+    sent: dict = {}
+
+    async def fake_send_email(**kwargs):
+        sent.update(kwargs)
+        return True
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", fake_attachments)
+    monkeypatch.setattr(ServiceChannelClient, "fetch_attachment_bytes", broken_bytes)
+    monkeypatch.setattr(wo_endpoints, "send_email", fake_send_email)
+
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-email")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["photos_attached"] == 0
+    assert body["photos_total"] == 1
+
+    assert sent.get("attachments") is None
+    assert "attached" not in sent["text"].split("Photos:")[1].split("\n")[0] or (
+        "couldn't attach" in sent["text"]
+    )
+    assert "Photos: 1 photo on file — couldn't attach" in sent["text"]
+
+
+async def test_send_vendor_email_stamps_assignment_notified(harness, monkeypatch) -> None:
+    """With a junction assignment, the notified stamp lives on the assignment
+    row (so a later assignment op's primary-resync can't wipe it)."""
+    ac, factory = harness
+    wo_id = await _seed(factory)
+
+    from app.models.work_order import WoVendorAssignment
+
+    async with factory() as s:
+        wo = (await s.execute(select(WorkOrder).where(WorkOrder.id == wo_id))).scalar_one()
+        s.add(WoVendorAssignment(work_order_id=wo.id, vendor_id=wo.assigned_vendor_id))
+        await s.commit()
+
+    async def no_attachments(self, sc_id):
+        return []
+
+    async def fake_send_email(**kwargs):
+        return True
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", no_attachments)
+    monkeypatch.setattr(wo_endpoints, "send_email", fake_send_email)
+
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-email")
+    assert resp.status_code == 200, resp.text
+
+    async with factory() as s:
+        wo = (await s.execute(select(WorkOrder).where(WorkOrder.id == wo_id))).scalar_one()
+        assignment = (
+            await s.execute(
+                select(WoVendorAssignment).where(WoVendorAssignment.work_order_id == wo.id)
+            )
+        ).scalar_one()
+        assert assignment.notified_at is not None
+        assert wo.brenk_vendor_notified_at is not None  # mirrored by resync
+
+
 async def test_send_vendor_email_no_email_400(harness, monkeypatch) -> None:
     ac, factory = harness
     wo_id = await _seed(factory, vendor_email=None)
@@ -261,3 +333,144 @@ async def test_send_vendor_email_unknown_wo_404(harness) -> None:
     ac, _ = harness
     resp = await ac.post("/api/v1/work-orders/999999999/send-vendor-email")
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# SMS send
+# --------------------------------------------------------------------------- #
+async def test_send_vendor_sms_success(harness, monkeypatch) -> None:
+    ac, factory = harness
+    wo_id = await _seed(factory)
+
+    async def fake_attachments(self, sc_id):
+        return [
+            {"Id": 1, "Name": "IMG_1.jpeg", "Uri": "https://blob/1?sig=a"},
+            {"Id": 2, "Name": "report.pdf", "Uri": "https://blob/2?sig=b"},
+            {"Id": 3, "Name": "IMG_3.jpeg", "Uri": "https://blob/3?sig=c"},
+        ]
+
+    async def fake_bytes(self, uri):
+        if uri.startswith("https://blob/2"):
+            return b"%PDF-", "application/pdf"  # not MMS-able, skipped
+        if uri.startswith("https://blob/3"):
+            raise RuntimeError("404 BlobNotFound")  # missing blob, skipped
+        return b"\xff\xd8\xffJPEG", "image/jpeg"
+
+    sent: dict = {}
+
+    async def fake_send_sms(**kwargs):
+        sent.update(kwargs)
+        return True
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", fake_attachments)
+    monkeypatch.setattr(ServiceChannelClient, "fetch_attachment_bytes", fake_bytes)
+    monkeypatch.setattr(wo_endpoints, "send_sms", fake_send_sms)
+
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-sms")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["sent"] is True
+    assert body["to_phone"] == "+15125551212"
+    assert body["photos_attached"] == 1  # only the fetchable jpeg
+    assert body["photos_total"] == 3
+
+    # Only the verified image rides along as MMS media.
+    assert sent["to"] == "+15125551212"
+    assert sent["media_urls"] == ["https://blob/1?sig=a"]
+    # The body claims exactly what attached, and flags the rest.
+    assert "1 photo attached — IMG_1.jpeg" in sent["body"]
+    assert "2 more couldn't be attached" in sent["body"]
+    assert "Gate code: 1234#TEST (front gate)" in sent["body"]
+
+    # notified timestamp stamped.
+    async with factory() as s:
+        wo = (await s.execute(select(WorkOrder).where(WorkOrder.id == wo_id))).scalar_one()
+        assert wo.brenk_vendor_notified_at is not None
+
+
+async def test_send_vendor_sms_normalizes_loose_phone(harness, monkeypatch) -> None:
+    ac, factory = harness
+    wo_id = await _seed(factory)
+    async with factory() as s:
+        vendor = (
+            await s.execute(select(Vendor).where(Vendor.sc_provider_id == SC_BASE))
+        ).scalar_one()
+        vendor.phone = "(512) 555-1212"
+        await s.commit()
+
+    async def no_attachments(self, sc_id):
+        return []
+
+    sent: dict = {}
+
+    async def fake_send_sms(**kwargs):
+        sent.update(kwargs)
+        return True
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", no_attachments)
+    monkeypatch.setattr(wo_endpoints, "send_sms", fake_send_sms)
+
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-sms")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["to_phone"] == "+15125551212"
+    assert sent["to"] == "+15125551212"
+
+
+async def test_send_vendor_sms_no_phone_400(harness, monkeypatch) -> None:
+    ac, factory = harness
+    wo_id = await _seed(factory)
+    async with factory() as s:
+        vendor = (
+            await s.execute(select(Vendor).where(Vendor.sc_provider_id == SC_BASE))
+        ).scalar_one()
+        vendor.phone = None
+        await s.commit()
+
+    async def fake_send_sms(**kwargs):  # should never be called
+        raise AssertionError("send_sms must not run without a phone")
+
+    monkeypatch.setattr(wo_endpoints, "send_sms", fake_send_sms)
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-sms")
+    assert resp.status_code == 400
+    assert "no phone" in resp.json()["detail"].lower()
+
+
+async def test_send_vendor_sms_bad_phone_400(harness, monkeypatch) -> None:
+    ac, factory = harness
+    wo_id = await _seed(factory)
+    async with factory() as s:
+        vendor = (
+            await s.execute(select(Vendor).where(Vendor.sc_provider_id == SC_BASE))
+        ).scalar_one()
+        vendor.phone = "call the office"
+        await s.commit()
+
+    async def fake_send_sms(**kwargs):  # should never be called
+        raise AssertionError("send_sms must not run for an unusable phone")
+
+    monkeypatch.setattr(wo_endpoints, "send_sms", fake_send_sms)
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-sms")
+    assert resp.status_code == 400
+    assert "textable" in resp.json()["detail"].lower()
+
+
+async def test_send_vendor_sms_failure_502(harness, monkeypatch) -> None:
+    ac, factory = harness
+    wo_id = await _seed(factory)
+
+    async def no_attachments(self, sc_id):
+        return []
+
+    async def fake_send_sms(**kwargs):
+        return False  # Twilio rejected / not configured
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", no_attachments)
+    monkeypatch.setattr(wo_endpoints, "send_sms", fake_send_sms)
+
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-sms")
+    assert resp.status_code == 502
+
+    # A failed send must NOT stamp notified.
+    async with factory() as s:
+        wo = (await s.execute(select(WorkOrder).where(WorkOrder.id == wo_id))).scalar_one()
+        assert wo.brenk_vendor_notified_at is None

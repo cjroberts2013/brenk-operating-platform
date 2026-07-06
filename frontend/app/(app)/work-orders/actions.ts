@@ -8,9 +8,11 @@ import {
   addAssignment,
   removeAssignment,
   sendVendorEmail,
+  sendVendorSms,
   syncWorkOrdersFromSc,
   updateAssignment,
   type VendorEmailResult,
+  type VendorSmsResult,
 } from '@/lib/api/work-orders'
 import type { WorkOrderSyncSummary } from '@/lib/api/types'
 
@@ -112,6 +114,21 @@ export async function sendVendorEmailAction(
 ): Promise<{ result?: VendorEmailResult; error?: string }> {
   try {
     const result = await sendVendorEmail(workOrderId)
+    // Refresh the detail page — the WO is now marked vendor-notified.
+    revalidatePath(`/work-orders/${workOrderId}`)
+    return { result }
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+}
+
+
+export async function sendVendorSmsAction(
+  workOrderId: number,
+): Promise<{ result?: VendorSmsResult; error?: string }> {
+  try {
+    const result = await sendVendorSms(workOrderId)
     // Refresh the detail page — the WO is now marked vendor-notified.
     revalidatePath(`/work-orders/${workOrderId}`)
     return { result }
