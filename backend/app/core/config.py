@@ -146,6 +146,11 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
+    # Where dispatch-receipt texts go (E.164). Every successful vendor
+    # notification (email or text) sends a short SMS receipt here — WO #,
+    # vendor, channel, and which signed-in operator sent it — so Daryl keeps
+    # a text trail even when someone else runs the platform. Empty = off.
+    DISPATCH_RECEIPT_TO_PHONE: str = ""
 
     # -------------------------------------------------------------------------
     # Dashboard — public base URL of the authenticated frontend, used to

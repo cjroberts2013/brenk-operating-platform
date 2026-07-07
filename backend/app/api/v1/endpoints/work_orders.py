@@ -19,6 +19,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.auth import CurrentUser, get_current_user
 from app.core.config import get_settings
 from app.db.session import get_async_db
 from app.models.invoice import Invoice
@@ -77,6 +78,7 @@ from app.services.sms import (
 from app.services.sync.work_orders import sync_all_work_orders
 from app.services.vendor_message import (
     MAX_TOTAL_ATTACHMENT_BYTES,
+    compose_dispatch_receipt,
     compose_vendor_message,
     text_to_html,
 )
@@ -1338,6 +1340,44 @@ async def get_vendor_message(
     )
 
 
+async def _send_dispatch_receipt(
+    *,
+    wo: WorkOrder,
+    vendor: Vendor,
+    channel: str,
+    photos_attached: int,
+    operator_email: str | None,
+) -> bool:
+    """Text Daryl a one-line receipt of a vendor notification (best-effort).
+
+    Fires after a successful email/text dispatch when
+    DISPATCH_RECEIPT_TO_PHONE is configured — the owner's text trail for
+    when someone else runs the platform. Never raises; a failed receipt
+    logs a warning and must not fail the dispatch that already happened.
+    """
+    settings = get_settings()
+    receipt_to = normalize_phone(settings.DISPATCH_RECEIPT_TO_PHONE)
+    if receipt_to is None:
+        return False
+    body = compose_dispatch_receipt(
+        wo=wo,
+        store_id=wo.location.store_id if wo.location else None,
+        trade_name=wo.trade.name if wo.trade else None,
+        vendor_name=vendor.name,
+        channel=channel,
+        photos_attached=photos_attached,
+        operator_email=operator_email,
+    )
+    try:
+        sent = await send_sms(to=receipt_to, body=body)
+    except Exception as exc:  # send_sms shouldn't raise, but a receipt never may
+        logger.warning("dispatch_receipt_failed", work_order_id=wo.id, error=str(exc))
+        return False
+    if not sent:
+        logger.warning("dispatch_receipt_not_sent", work_order_id=wo.id)
+    return sent
+
+
 class VendorEmailResult(BaseModel):
     """Result of POST /work-orders/{id}/send-vendor-email."""
 
@@ -1345,12 +1385,14 @@ class VendorEmailResult(BaseModel):
     to_email: str
     photos_attached: int
     photos_total: int
+    receipt_sent: bool = False
 
 
 @router.post("/{work_order_id}/send-vendor-email", response_model=VendorEmailResult)
 async def send_vendor_email(
     work_order_id: int,
     db: Annotated[AsyncSession, Depends(get_async_db)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> VendorEmailResult:
     """Email the composed vendor notification (photos attached) via Resend.
 
@@ -1431,11 +1473,19 @@ async def send_vendor_email(
         to=vendor.email,
         photos_attached=len(attachments_payload),
     )
+    receipt_sent = await _send_dispatch_receipt(
+        wo=wo,
+        vendor=vendor,
+        channel="email",
+        photos_attached=len(attachments_payload),
+        operator_email=user.email,
+    )
     return VendorEmailResult(
         sent=True,
         to_email=vendor.email,
         photos_attached=len(attachments_payload),
         photos_total=len(raw_attachments),
+        receipt_sent=receipt_sent,
     )
 
 
@@ -1490,12 +1540,14 @@ class VendorSmsResult(BaseModel):
     to_phone: str
     photos_attached: int
     photos_total: int
+    receipt_sent: bool = False
 
 
 @router.post("/{work_order_id}/send-vendor-sms", response_model=VendorSmsResult)
 async def send_vendor_sms(
     work_order_id: int,
     db: Annotated[AsyncSession, Depends(get_async_db)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> VendorSmsResult:
     """Text the composed vendor notification (photos as MMS) via Twilio.
 
@@ -1565,9 +1617,17 @@ async def send_vendor_sms(
         to=to_phone,
         photos_attached=len(media_urls),
     )
+    receipt_sent = await _send_dispatch_receipt(
+        wo=wo,
+        vendor=vendor,
+        channel="text",
+        photos_attached=len(media_urls),
+        operator_email=user.email,
+    )
     return VendorSmsResult(
         sent=True,
         to_phone=to_phone,
         photos_attached=len(media_urls),
         photos_total=len(raw_attachments),
+        receipt_sent=receipt_sent,
     )

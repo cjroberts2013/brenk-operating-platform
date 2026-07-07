@@ -143,3 +143,30 @@ def compose_vendor_message(
         subject += f" ({trade_name})"
 
     return ComposedMessage(subject=subject, body="\n".join(lines))
+
+
+def compose_dispatch_receipt(
+    *,
+    wo: WorkOrder,
+    store_id: str | None,
+    trade_name: str | None,
+    vendor_name: str,
+    channel: str,
+    photos_attached: int,
+    operator_email: str | None,
+) -> str:
+    """One-line SMS receipt to Daryl after a vendor notification goes out.
+
+    The audit trail for the worker-managed scenario: which WO went to which
+    vendor, over which channel (`"email"` / `"text"`), and which signed-in
+    operator sent it. Kept compact — it's a text, not a report.
+    """
+    ref_bits = ", ".join(p for p in [f"store {store_id}" if store_id else None, trade_name] if p)
+    ref = f" ({ref_bits})" if ref_bits else ""
+    noun = "photo" if photos_attached == 1 else "photos"
+    photos = f", {photos_attached} {noun}" if photos_attached else ""
+    operator = f" — by {operator_email}" if operator_email else ""
+    return (
+        f"Brenk dispatch: WO {wo.sc_number}{ref} sent to {vendor_name} "
+        f"by {channel}{photos}{operator}"
+    )

@@ -26,9 +26,13 @@ import type { VendorMessage, WorkOrderAttachment } from '@/lib/api/types'
 
 type SendMode = 'email' | 'sms'
 
-type SendResult =
-  | { kind: 'email'; to: string; photos_attached: number; photos_total: number }
-  | { kind: 'sms'; to: string; photos_attached: number; photos_total: number }
+type SendResult = {
+  kind: 'email' | 'sms'
+  to: string
+  photos_attached: number
+  photos_total: number
+  receipt_sent: boolean
+}
 
 /**
  * "Message vendor" card. Email goes through Resend (from the business
@@ -85,6 +89,7 @@ export function MessageVendorCard({
           to: r.to_email,
           photos_attached: r.photos_attached,
           photos_total: r.photos_total,
+          receipt_sent: r.receipt_sent,
         })
       } else {
         const res = await sendVendorSmsAction(workOrderId)
@@ -98,6 +103,7 @@ export function MessageVendorCard({
           to: r.to_phone,
           photos_attached: r.photos_attached,
           photos_total: r.photos_total,
+          receipt_sent: r.receipt_sent,
         })
       }
       setMode(null)
@@ -143,6 +149,11 @@ export function MessageVendorCard({
               <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">
                 {result.photos_attached} photo
                 {result.photos_attached === 1 ? '' : 's'} attached.
+              </p>
+            ) : null}
+            {result.receipt_sent ? (
+              <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">
+                Receipt texted to Daryl.
               </p>
             ) : null}
           </div>

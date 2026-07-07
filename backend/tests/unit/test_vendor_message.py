@@ -146,3 +146,56 @@ def test_works_without_vendor() -> None:
     msg = _compose(vendor=None)
     assert "WO #: 343852740" in msg.body
     assert msg.body.startswith("New work order from Brenk Facility Services")
+
+
+# --------------------------------------------------------------------------- #
+# Dispatch receipt (the owner's text trail)
+# --------------------------------------------------------------------------- #
+def test_dispatch_receipt_full() -> None:
+    from app.services.vendor_message import compose_dispatch_receipt
+
+    body = compose_dispatch_receipt(
+        wo=_wo(),
+        store_id="0751",
+        trade_name="GATE/KEY PADS",
+        vendor_name="Larry's Locksmith",
+        channel="text",
+        photos_attached=2,
+        operator_email="sue@brenkfacilityservices.com",
+    )
+    assert body == (
+        "Brenk dispatch: WO 343852740 (store 0751, GATE/KEY PADS) sent to "
+        "Larry's Locksmith by text, 2 photos — by sue@brenkfacilityservices.com"
+    )
+
+
+def test_dispatch_receipt_minimal() -> None:
+    from app.services.vendor_message import compose_dispatch_receipt
+
+    body = compose_dispatch_receipt(
+        wo=_wo(),
+        store_id=None,
+        trade_name=None,
+        vendor_name="Larry's Locksmith",
+        channel="email",
+        photos_attached=0,
+        operator_email=None,
+    )
+    # No ref parens, no photo clause, no operator when data is missing.
+    assert body == "Brenk dispatch: WO 343852740 sent to Larry's Locksmith by email"
+
+
+def test_dispatch_receipt_singular_photo() -> None:
+    from app.services.vendor_message import compose_dispatch_receipt
+
+    body = compose_dispatch_receipt(
+        wo=_wo(),
+        store_id="0751",
+        trade_name=None,
+        vendor_name="Larry's Locksmith",
+        channel="email",
+        photos_attached=1,
+        operator_email=None,
+    )
+    assert "1 photo —" not in body  # no trailing operator dash
+    assert ", 1 photo" in body

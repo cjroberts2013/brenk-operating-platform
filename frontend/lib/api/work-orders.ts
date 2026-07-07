@@ -121,6 +121,7 @@ export type VendorEmailResult = {
   to_email: string
   photos_attached: number
   photos_total: number
+  receipt_sent: boolean
 }
 
 export function sendVendorEmail(id: number): Promise<VendorEmailResult> {
@@ -135,6 +136,7 @@ export type VendorSmsResult = {
   to_phone: string
   photos_attached: number
   photos_total: number
+  receipt_sent: boolean
 }
 
 export function sendVendorSms(id: number): Promise<VendorSmsResult> {

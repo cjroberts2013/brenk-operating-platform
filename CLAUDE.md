@@ -457,6 +457,25 @@ messaging round-out (unassign fixes, truthful photo attach, Twilio SMS).**
   reliably deliver — unregistered traffic gets filtered; that requirement
   is carrier-side and provider-agnostic.
 
+**Completed (2026-07-07, deployed):** A2P campaign resubmission support
+(CTA rejection — fixes: specific campaign description, STOP line in
+samples, branded help message; vendor TEXTS now end with "Reply STOP to
+opt out." so real sends match the samples — emails unchanged). Stale
+prod RESEND_API_KEY fixed (Resend 401 "API key is invalid" — quote
+emails + digest were silently failing; valid dev key set on both Fly
+apps). **Dispatch receipts (Phase 1) BUILT:** every successful vendor
+notification (email or text) also texts a one-line receipt — WO #,
+store + trade, vendor, channel, photo count, and the signed-in
+operator's email from the JWT — to `DISPATCH_RECEIPT_TO_PHONE` (empty =
+off; NOT yet set in prod — flip on at Twilio go-live, Charles's cell
+first, then Daryl's). Best-effort: a failed receipt never fails the
+dispatch; responses carry `receipt_sent` and the UI shows "Receipt
+texted to Daryl." Composer `compose_dispatch_receipt` lives beside the
+vendor-message composer. Planned next: Phase 0 go-live checklist on
+campaign approval (live test, STOP round-trip), then Phase 2 vendor
+reply forwarding (Twilio inbound webhook -> forward vendor replies to
+Daryl; closes the "replies go nowhere" gap).
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)

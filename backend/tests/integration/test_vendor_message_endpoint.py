@@ -456,6 +456,87 @@ async def test_send_vendor_sms_bad_phone_400(harness, monkeypatch) -> None:
     assert "textable" in resp.json()["detail"].lower()
 
 
+async def test_dispatch_receipt_sent_for_both_channels(harness, monkeypatch) -> None:
+    """With DISPATCH_RECEIPT_TO_PHONE set, a successful email or text dispatch
+    also texts Daryl a receipt naming the WO, vendor, channel, and operator."""
+    ac, factory = harness
+    wo_id = await _seed(factory)
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "DISPATCH_RECEIPT_TO_PHONE", "(512) 555-0199")
+
+    async def no_attachments(self, sc_id):
+        return []
+
+    sms_calls: list[dict] = []
+
+    async def fake_send_sms(**kwargs):
+        sms_calls.append(kwargs)
+        return True
+
+    async def fake_send_email(**kwargs):
+        return True
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", no_attachments)
+    monkeypatch.setattr(wo_endpoints, "send_sms", fake_send_sms)
+    monkeypatch.setattr(wo_endpoints, "send_email", fake_send_email)
+
+    # Email dispatch -> one SMS (the receipt).
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-email")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["receipt_sent"] is True
+    assert len(sms_calls) == 1
+    receipt = sms_calls[0]
+    assert receipt["to"] == "+15125550199"  # normalized from the setting
+    assert "Brenk dispatch: WO 343852740" in receipt["body"]
+    assert "Larry's Locksmith by email" in receipt["body"]
+    assert "by test@example.com" in receipt["body"]  # operator from the JWT
+
+    # Text dispatch -> two SMS: the vendor message, then the receipt.
+    sms_calls.clear()
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-sms")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["receipt_sent"] is True
+    assert len(sms_calls) == 2
+    assert sms_calls[0]["to"] == "+15125551212"  # vendor first
+    assert "Larry's Locksmith by text" in sms_calls[1]["body"]
+
+
+async def test_dispatch_receipt_off_by_default_and_best_effort(harness, monkeypatch) -> None:
+    ac, factory = harness
+    wo_id = await _seed(factory)
+
+    async def no_attachments(self, sc_id):
+        return []
+
+    async def fake_send_email(**kwargs):
+        return True
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", no_attachments)
+    monkeypatch.setattr(wo_endpoints, "send_email", fake_send_email)
+
+    # Unset (default): no receipt attempted, dispatch still succeeds.
+    async def must_not_send(**kwargs):
+        raise AssertionError("no receipt SMS should be attempted when unset")
+
+    monkeypatch.setattr(wo_endpoints, "send_sms", must_not_send)
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-email")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["receipt_sent"] is False
+
+    # Configured but Twilio fails: dispatch still succeeds, receipt flagged.
+    settings = get_settings()
+    monkeypatch.setattr(settings, "DISPATCH_RECEIPT_TO_PHONE", "+15125550199")
+
+    async def failing_sms(**kwargs):
+        return False
+
+    monkeypatch.setattr(wo_endpoints, "send_sms", failing_sms)
+    resp = await ac.post(f"/api/v1/work-orders/{wo_id}/send-vendor-email")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["receipt_sent"] is False
+
+
 async def test_send_vendor_sms_failure_502(harness, monkeypatch) -> None:
     ac, factory = harness
     wo_id = await _seed(factory)
