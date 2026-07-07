@@ -72,9 +72,14 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "occupied unit",
+        # NOT standalone "tenant" — prod boilerplate like "Building #:
+        # Tenant Parking Area" false-positives it. A tenant followed by a
+        # verb (or "tenant in <unit>") is someone being coordinated with;
+        # a tenant used as a place name isn't.
         re.compile(
             r"\boccupied\b|customer'?s? (?:unit|cube)|tenant'?s? (?:unit|cube)"
-            r"|their cube|\btenants?\b",
+            r"|their cube"
+            r"|tenants? (?:is|are|was|were|will|must|needs?|can|should|have|has|in)\b",
             re.IGNORECASE,
         ),
     ),

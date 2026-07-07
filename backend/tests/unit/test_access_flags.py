@@ -48,6 +48,9 @@ REAL_NEGATIVES = [
     "The 3 backflow inspection is scheduled for this Friday 5/15",
     "Our alarm panel is still waiting for the replacement battery.",
     "Scheduled Date has been changed from May 6 to May 7.",
+    # Prod backfill dry-run FP (2026-07-07): "Tenant" as a place name.
+    "Day of the week access will be granted?: M-F / Building #: Tenant "
+    "Parking Area / The parking area gate is damaged",
     "",
 ]
 
