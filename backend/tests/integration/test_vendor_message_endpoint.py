@@ -381,6 +381,8 @@ async def test_send_vendor_sms_success(harness, monkeypatch) -> None:
     assert "1 photo attached — IMG_1.jpeg" in sent["body"]
     assert "2 more couldn't be attached" in sent["body"]
     assert "Gate code: 1234#TEST (front gate)" in sent["body"]
+    # A2P compliance suffix on texts only — must match the campaign samples.
+    assert sent["body"].endswith("Reply STOP to opt out.")
 
     # notified timestamp stamped.
     async with factory() as s:

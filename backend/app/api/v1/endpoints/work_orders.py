@@ -1540,7 +1540,11 @@ async def send_vendor_sms(
         photos_unavailable=len(raw_attachments) - len(attached_raw),
     )
 
-    sent = await send_sms(to=to_phone, body=composed.body, media_urls=media_urls)
+    # SMS-only compliance suffix — matches the sample messages on the A2P
+    # 10DLC campaign registration (emails don't carry it).
+    sms_body = f"{composed.body}\nReply STOP to opt out."
+
+    sent = await send_sms(to=to_phone, body=sms_body, media_urls=media_urls)
     if not sent:
         raise HTTPException(
             status_code=http_status.HTTP_502_BAD_GATEWAY,
