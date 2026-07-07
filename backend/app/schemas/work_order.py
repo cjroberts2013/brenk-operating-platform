@@ -182,6 +182,12 @@ class WorkOrderSummary(_OrmModel):
     brenk_category_source: str | None  # 'ai' | 'confirmed' | 'manual'
     brenk_category_confidence: Decimal | None
 
+    # Customer-unit access flag ("call ahead"). Active when flag_at is set
+    # and dismissed_at is null — the list shows a key badge on active rows.
+    brenk_access_flag_at: datetime | None
+    brenk_access_flag_dismissed_at: datetime | None
+    brenk_access_scheduled_at: datetime | None
+
     # Computed by the list endpoint (not an ORM column): is this WO
     # sitting in its stage past the dashboard's stuck threshold? Lets
     # the list flag stalled rows inline. Defaults False; set per row
@@ -281,6 +287,15 @@ class WorkOrderDetail(_OrmModel):
     brenk_category_confidence: Decimal | None
     brenk_category_ai: str | None
     brenk_category_at: datetime | None
+
+    # Customer-unit access flag ("call ahead — tenant must be there with a
+    # key"). Auto-detected from the description / store-manager notes; the
+    # snippet is the matched excerpt shown as the receipt in the banner.
+    brenk_access_flag_at: datetime | None
+    brenk_access_flag_source: str | None  # 'description' | 'note'
+    brenk_access_flag_snippet: str | None
+    brenk_access_flag_dismissed_at: datetime | None
+    brenk_access_scheduled_at: datetime | None
     # Computed markup suggestion (not stored): the average markup of past
     # jobs in this category (≥3 samples) else the trade default. Attached by
     # the detail endpoint; `*_label` explains the basis for the UI.

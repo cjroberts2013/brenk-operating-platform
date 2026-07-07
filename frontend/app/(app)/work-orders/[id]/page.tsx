@@ -10,6 +10,7 @@ import {
 import { AttachmentsSection } from '@/components/work-orders/AttachmentsSection'
 import { CategoryControl } from '@/components/work-orders/CategoryControl'
 import { NotesTimeline } from '@/components/work-orders/NotesTimeline'
+import { AccessFlagBanner } from '@/components/work-orders/AccessFlagBanner'
 import { DeadlineBadge } from '@/components/work-orders/DeadlineBadge'
 import { StatusBadge } from '@/components/work-orders/StatusBadge'
 import { MarkPaidControl } from '@/components/work-orders/MarkPaidControl'
@@ -239,6 +240,10 @@ export default async function WorkOrderDetailPage({
           </div>
         </div>
       </header>
+
+      {/* Call-ahead warning — above everything actionable so nobody gets
+          dispatched to a unit they can't get into. */}
+      <AccessFlagBanner wo={wo} />
 
       {/* Always-visible pipeline strip + collapsible full checklist for
           overriding any stage. Replaces the tall vertical checklist. */}

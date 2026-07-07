@@ -81,6 +81,11 @@ export type WorkOrderSummary = {
   brenk_category: string | null
   brenk_category_source: string | null // 'ai' | 'confirmed' | 'manual'
   brenk_category_confidence: string | null
+  /** Customer-unit access flag ("call ahead — tenant must be there with a
+   *  key"). Active = flag_at set and dismissed_at null. */
+  brenk_access_flag_at: string | null
+  brenk_access_flag_dismissed_at: string | null
+  brenk_access_scheduled_at: string | null
   /** Computed by the list endpoint: WO is past its stage's stuck
    *  threshold (same definition the dashboard uses). */
   is_stuck: boolean
@@ -216,6 +221,16 @@ export type WorkOrderDetail = {
   brenk_category_confidence: string | null
   brenk_category_ai: string | null
   brenk_category_at: string | null
+
+  /** Customer-unit access flag ("call ahead — tenant must be there with a
+   *  key"). Auto-detected from the description / store notes; the snippet
+   *  is the matched excerpt shown in the banner. */
+  brenk_access_flag_at: string | null
+  brenk_access_flag_source: string | null // 'description' | 'note'
+  brenk_access_flag_snippet: string | null
+  brenk_access_flag_dismissed_at: string | null
+  brenk_access_scheduled_at: string | null
+
   /** Computed markup suggestion: category average (≥3 jobs) else trade
    *  default. `*_label` explains the basis. */
   suggested_markup_percent: string | null
@@ -532,6 +547,9 @@ export type WorkOrderUpdate = {
   brenk_category?: string | null
   /** "confirm" marks the current AI category operator-confirmed. */
   category_action?: 'confirm'
+  /** Customer-unit access flag actions: dismiss a false positive,
+   *  record that a time was scheduled with the tenant, or reopen. */
+  access_flag?: 'dismiss' | 'scheduled' | 'reopen'
 }
 
 /** Shape of the body for PATCH /api/v1/trades/{id}. */

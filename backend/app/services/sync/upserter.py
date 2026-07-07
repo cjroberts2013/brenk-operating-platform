@@ -24,6 +24,7 @@ from app.models.work_order import (
     WorkOrder,
     WorkOrderStatusHistory,
 )
+from app.services.access_flags import apply_description_flag
 from app.services.sync.transformers import (
     extract_client_fields,
     extract_location_fields,
@@ -155,6 +156,7 @@ async def upsert_work_order(session: AsyncSession, payload: dict[str, Any]) -> W
             **fields,
         )
         session.add(wo)
+        apply_description_flag(wo)
         await session.flush()
         logger.info(
             "work_order created",
@@ -189,5 +191,6 @@ async def upsert_work_order(session: AsyncSession, payload: dict[str, Any]) -> W
     existing.last_synced_at = datetime.now(UTC)
     for key, value in fields.items():
         setattr(existing, key, value)
+    apply_description_flag(existing)
     await session.flush()
     return existing

@@ -45,6 +45,7 @@ from app.schemas.work_order import (
     WorkOrderNoteRef,
     WorkOrderSummary,
 )
+from app.services.access_flags import is_flag_active
 from app.services.deadlines import (
     classify_urgency,
     days_past_deadline,
@@ -152,6 +153,10 @@ class WorkOrderUpdate(BaseModel):
     # "confirm"` keeps the current value but marks it operator-confirmed.
     brenk_category: str | None = Field(default=None)
     category_action: Literal["confirm"] | None = Field(default=None)
+    # Customer-unit access flag actions ("call ahead"): dismiss a false
+    # positive, record that a time was scheduled with the tenant, or
+    # reopen after either.
+    access_flag: Literal["dismiss", "scheduled", "reopen"] | None = Field(default=None)
 
 
 class WorkOrderSyncStatus(BaseModel):
@@ -287,6 +292,16 @@ async def list_work_orders(
             ),
         ),
     ] = False,
+    access_flag: Annotated[
+        bool,
+        Query(
+            description=(
+                "If true, return only WOs with an active customer-unit access "
+                "flag (call ahead — tenant must be present with a key). Active "
+                "means detected and not dismissed."
+            ),
+        ),
+    ] = False,
     page: Annotated[int, Query(ge=1, description="1-indexed page number")] = 1,
     page_size: Annotated[
         int,
@@ -409,6 +424,11 @@ async def list_work_orders(
     # confirmed or overridden yet (source stays 'ai' until they act).
     if category_review:
         filters.append(WorkOrder.brenk_category_source == "ai")
+
+    # Active customer-unit access flags (detected, not dismissed).
+    if access_flag:
+        filters.append(WorkOrder.brenk_access_flag_at.is_not(None))
+        filters.append(WorkOrder.brenk_access_flag_dismissed_at.is_(None))
 
     # Free-text search. We OR across columns the operator is likely to
     # type — WO number, SC purchase number, problem code, caller free
@@ -1067,6 +1087,19 @@ async def update_work_order(
         if assignments:
             assignments[0].notified_at = stamp
 
+    # Customer-unit access flag actions. `dismiss` = false positive /
+    # not applicable (a NEW matching note re-opens it); `scheduled` = the
+    # call-ahead happened, a time is set with the tenant; `reopen` = undo.
+    if "access_flag" in update_data:
+        action = update_data["access_flag"]
+        if action == "dismiss":
+            wo.brenk_access_flag_dismissed_at = datetime.now(UTC)
+        elif action == "scheduled":
+            wo.brenk_access_scheduled_at = datetime.now(UTC)
+        elif action == "reopen":
+            wo.brenk_access_flag_dismissed_at = None
+            wo.brenk_access_scheduled_at = None
+
     # Category: a manual override (validated against the taxonomy) takes
     # precedence; otherwise a "confirm" marks the current AI value accepted.
     if "brenk_category" in update_data:
@@ -1329,6 +1362,7 @@ async def get_vendor_message(
         active_gate_codes=active_gate_codes,
         attachments=attachments,
         vendor=vendor,
+        access_flag_active=is_flag_active(wo),
     )
     return VendorMessage(
         subject=composed.subject,
@@ -1439,6 +1473,7 @@ async def send_vendor_email(
         attachments=attached_raw,
         vendor=vendor,
         photos_unavailable=len(raw_attachments) - len(attached_raw),
+        access_flag_active=is_flag_active(wo),
     )
 
     settings = get_settings()
@@ -1590,6 +1625,7 @@ async def send_vendor_sms(
         attachments=attached_raw,
         vendor=vendor,
         photos_unavailable=len(raw_attachments) - len(attached_raw),
+        access_flag_active=is_flag_active(wo),
     )
 
     # SMS-only compliance suffix — matches the sample messages on the A2P

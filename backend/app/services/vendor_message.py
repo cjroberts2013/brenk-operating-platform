@@ -108,6 +108,7 @@ def compose_vendor_message(
     attachments: list[dict[str, Any]],
     vendor: Vendor | None,
     photos_unavailable: int = 0,
+    access_flag_active: bool = False,
 ) -> ComposedMessage:
     """Build the (subject, body) for the vendor notification message.
 
@@ -131,6 +132,11 @@ def compose_vendor_message(
     if trade_name:
         lines.append(f"Trade: {trade_name}")
     lines.append(f"Problem: {description}")
+    if access_flag_active:
+        lines.append(
+            "ACCESS: customer unit — call ahead and schedule a time; "
+            "the tenant must be there with a key (or leave one at the office)."
+        )
     lines.append(_photos_line(attachments, photos_unavailable))
     lines.append("")
     lines.append(_SIGNOFF)

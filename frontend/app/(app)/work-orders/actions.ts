@@ -124,6 +124,22 @@ export async function sendVendorEmailAction(
 }
 
 
+/** Customer-unit access flag lifecycle: dismiss / scheduled / reopen. */
+export async function accessFlagAction(
+  workOrderId: number,
+  action: 'dismiss' | 'scheduled' | 'reopen',
+): Promise<{ error?: string }> {
+  try {
+    await patchWorkOrder(workOrderId, { access_flag: action })
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.detail }
+    throw err
+  }
+  revalidatePath(`/work-orders/${workOrderId}`)
+  return {}
+}
+
+
 export async function sendVendorSmsAction(
   workOrderId: number,
 ): Promise<{ result?: VendorSmsResult; error?: string }> {

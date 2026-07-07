@@ -476,6 +476,38 @@ campaign approval (live test, STOP round-trip), then Phase 2 vendor
 reply forwarding (Twilio inbound webhook -> forward vendor replies to
 Daryl; closes the "replies go nowhere" gap).
 
+**Completed (2026-07-07, dev): customer-unit access flag ("call ahead").**
+Daryl's pain point: work inside a tenant's unit needs the tenant there
+with a key; the signal is in the WO description at creation or arrives
+DAYS LATER as a store-manager note, and missing it = wasted trip.
+- **Detection** (`app/services/access_flags.py`): curated regex list
+  calibrated against a prod scan of descriptions + notes (real phrases:
+  "did not leave a key", "tenant will drop key off", "meet us at the
+  unit", "key release form"). Scans ONLY human text — descriptions and
+  `note_type='UsersNote'` rows; SystemNotes are automated noise that
+  false-positives ("WAITING FOR APPROVAL"). Keyword-first by design:
+  false positive = one click to dismiss, false negative = wasted trip.
+  Gemini fallback is the agreed v2 if store phrasing evades the list.
+- **Data** (migration `3f1cd1fcda86`): brenk_access_flag_at/_source/
+  _note_id/_snippet/_dismissed_at + brenk_access_scheduled_at on
+  work_orders. Lifecycle: auto-set → operator "Scheduled with tenant"
+  (records the call-ahead) or Dismiss; a NEW matching note re-opens a
+  dismissed flag (fresh evidence wins), old notes re-syncing never do
+  (only genuinely-new note rows are scanned — upsert_note now returns
+  (note, created)).
+- **Hooks**: upsert_work_order scans the description (create + update,
+  only while never-flagged); sync_notes_for_work_order scans each new
+  UsersNote. Backfill: `scripts/backfill_access_flags.py` (dry-run
+  default; env-arg pattern).
+- **Surfacing**: amber banner atop the WO detail (snippet + source +
+  Scheduled/Dismiss; green once scheduled), key badge on WO list rows
+  ("Call ahead"/"Scheduled"), `?access_flag=true` list filter, and the
+  composed vendor message (email + SMS) gains an "ACCESS: customer
+  unit — call ahead…" line whenever the flag is active.
+- PATCH action `access_flag: dismiss|scheduled|reopen` (mirrors
+  paid/notified shape). Dev backfill: 1 real hit, 0 false positives
+  over 75 open WOs.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)

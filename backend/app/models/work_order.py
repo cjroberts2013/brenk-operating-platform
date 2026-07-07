@@ -445,6 +445,19 @@ class WorkOrder(Base, TimestampMixin):
     # mode. Null = not yet notified. SC has no equivalent.
     brenk_vendor_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Customer-unit access flag ("call ahead — tenant must be there with a
+    # key"). Auto-detected by scanning the description + UsersNote notes
+    # (app/services/access_flags.py); the snippet is the matched excerpt
+    # shown as the receipt. `dismissed_at` = operator judged it a false
+    # positive (a NEW matching note re-opens it); `scheduled_at` = the
+    # call-ahead happened and a time is set with the tenant.
+    brenk_access_flag_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    brenk_access_flag_source: Mapped[str | None] = mapped_column(String(20))
+    brenk_access_flag_note_id: Mapped[int | None] = mapped_column(BigInteger)
+    brenk_access_flag_snippet: Mapped[str | None] = mapped_column(Text)
+    brenk_access_flag_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    brenk_access_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Brenk job category (AI-inferred, then confirmed/overridden by the
     # operator). Distinct from SC's `trade` and `category` — a `JobType` name
     # from the shared `job_types` taxonomy, used for profit metrics, markup

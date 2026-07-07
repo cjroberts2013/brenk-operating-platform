@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import {
   ExclamationTriangleIcon,
+  KeyIcon,
   SparklesIcon,
   XMarkIcon,
 } from '@heroicons/react/20/solid'
@@ -314,6 +315,25 @@ export default async function WorkOrdersPage({
                           urgency={wo.deadline_urgency}
                           daysPast={wo.deadline_days_past}
                         />
+                        {wo.brenk_access_flag_at &&
+                        !wo.brenk_access_flag_dismissed_at ? (
+                          <span
+                            title={
+                              wo.brenk_access_scheduled_at
+                                ? 'Customer-unit access — scheduled with tenant'
+                                : 'Customer-unit access — call ahead'
+                            }
+                            className={
+                              'inline-flex items-center gap-0.5 rounded-sm px-1.5 py-px text-[10px] font-medium uppercase ' +
+                              (wo.brenk_access_scheduled_at
+                                ? 'bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-400'
+                                : 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400')
+                            }
+                          >
+                            <KeyIcon className="size-2.5" />
+                            {wo.brenk_access_scheduled_at ? 'Scheduled' : 'Call ahead'}
+                          </span>
+                        ) : null}
                       </div>
                     </Td>
                     <Td>

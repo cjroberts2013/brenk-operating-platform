@@ -155,6 +155,49 @@ async def test_vendor_message_attachments_best_effort(harness, monkeypatch) -> N
     assert resp.json()["photo_count"] == 0
 
 
+async def test_vendor_message_access_line_and_flag_actions(harness, monkeypatch) -> None:
+    """A WO with an active access flag gets the ACCESS line in the vendor
+    message; dismissing the flag (PATCH action) removes it; reopening
+    restores it."""
+    ac, factory = harness
+    wo_id = await _seed(factory)
+
+    from datetime import UTC, datetime
+
+    async with factory() as s:
+        wo = (await s.execute(select(WorkOrder).where(WorkOrder.id == wo_id))).scalar_one()
+        wo.brenk_access_flag_at = datetime.now(UTC)
+        wo.brenk_access_flag_source = "note"
+        wo.brenk_access_flag_snippet = "tenant will drop key off"
+        await s.commit()
+
+    async def no_attachments(self, sc_id):
+        return []
+
+    monkeypatch.setattr(ServiceChannelClient, "get_work_order_attachments", no_attachments)
+
+    resp = await ac.get(f"/api/v1/work-orders/{wo_id}/vendor-message")
+    assert resp.status_code == 200, resp.text
+    assert "ACCESS: customer unit — call ahead" in resp.json()["body"]
+
+    # Dismiss -> line disappears; detail reflects the dismissal.
+    resp = await ac.patch(f"/api/v1/work-orders/{wo_id}", json={"access_flag": "dismiss"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["brenk_access_flag_dismissed_at"] is not None
+
+    resp = await ac.get(f"/api/v1/work-orders/{wo_id}/vendor-message")
+    assert "ACCESS:" not in resp.json()["body"]
+
+    # Scheduled stamps its own timestamp; reopen clears both.
+    resp = await ac.patch(f"/api/v1/work-orders/{wo_id}", json={"access_flag": "scheduled"})
+    assert resp.json()["brenk_access_scheduled_at"] is not None
+    resp = await ac.patch(f"/api/v1/work-orders/{wo_id}", json={"access_flag": "reopen"})
+    body = resp.json()
+    assert body["brenk_access_flag_dismissed_at"] is None
+    assert body["brenk_access_scheduled_at"] is None
+    assert body["brenk_access_flag_snippet"] == "tenant will drop key off"
+
+
 async def test_vendor_message_unknown_wo_404(harness) -> None:
     ac, _ = harness
     resp = await ac.get("/api/v1/work-orders/999999999/vendor-message")

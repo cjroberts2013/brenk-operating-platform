@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.work_order import WorkOrder, WorkOrderNote
+from app.services.access_flags import apply_note_flag
 from app.services.servicechannel.client import ServiceChannelClient
 from app.services.sync.transformers import extract_note_fields
 
@@ -26,12 +27,15 @@ async def upsert_note(
     session: AsyncSession,
     payload: dict[str, Any],
     work_order_id: int,
-) -> WorkOrderNote:
+) -> tuple[WorkOrderNote, bool]:
     """Get-or-create a WorkOrderNote row from an SC note payload.
 
     Natural key is `sc_note_id`. If absent (shouldn't happen for
     SC-sourced notes, but the column is nullable to leave room for
     Brenk-originated notes later), inserts a new row unconditionally.
+    Returns (note, created) — created is True only for genuinely new
+    rows, which is what gates access-flag scanning (an old note that
+    re-syncs must not re-open a dismissed flag).
     """
     fields = extract_note_fields(payload)
     sc_note_id = fields["sc_note_id"]
@@ -44,12 +48,12 @@ async def upsert_note(
                 setattr(existing, key, value)
             existing.work_order_id = work_order_id
             await session.flush()
-            return existing
+            return existing, False
 
     note = WorkOrderNote(work_order_id=work_order_id, **fields)
     session.add(note)
     await session.flush()
-    return note
+    return note, True
 
 
 async def sync_notes_for_work_order(
@@ -71,7 +75,11 @@ async def sync_notes_for_work_order(
     notes_payload: list[dict[str, Any]] = response.get("Notes", []) if response else []
 
     for note in notes_payload:
-        await upsert_note(session, note, work_order.id)
+        row, created = await upsert_note(session, note, work_order.id)
+        if created:
+            # New human note — the "store manager added a note days later
+            # saying wait for the unit key" case lands here.
+            apply_note_flag(work_order, row)
 
     logger.info(
         "notes synced for work order",
