@@ -459,8 +459,19 @@ messaging round-out (unassign fixes, truthful photo attach, Twilio SMS).**
 
 **Completed (2026-07-07, deployed):** A2P campaign resubmission support
 (CTA rejection — fixes: specific campaign description, STOP line in
-samples, branded help message; vendor TEXTS now end with "Reply STOP to
-opt out." so real sends match the samples — emails unchanged). Stale
+samples, branded help message). **ROOT CAUSE of the repeated CTA
+rejections found (2026-07-07): the Twilio customer profile was
+registered as an INDIVIDUAL (Charles, personal Gmail), not as Brenk
+Facility Services, LLC** — the reviewer couldn't tie the campaign's
+claimed business/website to the brand, so content-level fixes could
+never pass. Fix in flight: Business customer profile for the LLC (EIN
+from Daryl) created 2026-07-07, in review → then register a Low Volume
+Standard brand under it → recreate the campaign (existing content is
+good: description, consent text w/ URLs, samples w/ STOP line) →
+attach +15127780725 → delete the old rejected campaign under the
+Individual profile. Fallback if round 3 fails: toll-free verification
+(lighter review, loses the local number). (Also that session: vendor TEXTS now end with "Reply STOP to
+opt out." so real sends match the samples — emails unchanged.) Stale
 prod RESEND_API_KEY fixed (Resend 401 "API key is invalid" — quote
 emails + digest were silently failing; valid dev key set on both Fly
 apps). **Dispatch receipts (Phase 1) BUILT:** every successful vendor
