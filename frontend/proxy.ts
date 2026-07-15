@@ -31,7 +31,13 @@ const PUBLIC_PATHS = new Set(['/robots.txt', '/sitemap.xml', '/favicon.ico'])
  *  host (incl. localhost) so the public CTAs — e.g. "Request a Quote" →
  *  `/quote` — are clickable in local dev too, not just behind the
  *  bare-domain rewrite. Keep this list small; one entry per real page. */
-const STOREFRONT_ROUTES = new Set(['/quote', '/about', '/privacy', '/sms-terms'])
+const STOREFRONT_ROUTES = new Set([
+  '/quote',
+  '/about',
+  '/privacy',
+  '/sms-terms',
+  '/sms-consent',
+])
 
 /** True when the request host should serve the public marketing
  *  storefront instead of the dashboard. The dashboard lives at

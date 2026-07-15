@@ -39,7 +39,11 @@ export default async function SmsTermsPage() {
               agreed to receive them. Messages relate to jobs you are hired to
               perform and may include the job location, work description,
               site-access details, and job-site photos. This is not a
-              marketing program.
+              marketing program. See{' '}
+              <a href="/sms-consent" className="text-signal underline hover:text-signal-ink">
+                SMS Consent &amp; Opt-In
+              </a>{' '}
+              for how subcontractors opt in.
             </p>
           </Section>
 
