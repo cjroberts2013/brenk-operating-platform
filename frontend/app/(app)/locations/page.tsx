@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ArrowDownTrayIcon } from '@heroicons/react/20/solid'
 
 import { RatingBadge } from '@/components/locations/RatingBadge'
 import { Pagination } from '@/components/work-orders/Pagination'
@@ -21,6 +22,16 @@ function parsePositiveInt(
   const raw = Array.isArray(value) ? value[0] : value
   const n = Number(raw)
   return Number.isInteger(n) && n > 0 ? n : fallback
+}
+
+/** Build the `?q=&rating=` suffix for the export link so a download
+ *  matches the currently-filtered view. Empty string when unfiltered. */
+function exportQuery(q?: string, rating?: string): string {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  if (rating) params.set('rating', rating)
+  const s = params.toString()
+  return s ? `?${s}` : ''
 }
 
 function formatDate(iso: string | null): string {
@@ -72,7 +83,16 @@ export default async function LocationsPage({
             {rating ? <> · rated {rating}</> : null}.
           </p>
         </div>
-        <RatingFilter current={rating} />
+        <div className="flex items-center gap-3">
+          <a
+            href={`/locations/export${exportQuery(q, rating)}`}
+            className="inline-flex items-center gap-1.5 rounded-md bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-xs ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-white/5 dark:text-gray-200 dark:ring-white/10 dark:hover:bg-white/10"
+          >
+            <ArrowDownTrayIcon className="size-4" />
+            Download Excel
+          </a>
+          <RatingFilter current={rating} />
+        </div>
       </header>
 
       <div className="overflow-hidden rounded-lg ring-1 ring-gray-200 dark:ring-white/10">

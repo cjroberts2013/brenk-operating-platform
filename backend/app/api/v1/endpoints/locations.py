@@ -18,7 +18,7 @@ No POST-create / DELETE for locations — they come from sync.
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +36,10 @@ from app.schemas.location import (
 )
 from app.schemas.work_order import WorkOrderListResponse, WorkOrderSummary
 from app.services.addresses import format_address
+from app.services.location_export import (
+    XLSX_MEDIA_TYPE,
+    build_locations_workbook,
+)
 from app.services.pipeline import classify, is_stuck
 
 router = APIRouter()
@@ -200,6 +204,63 @@ async def list_locations(
         items.append(summary)
 
     return LocationListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+def _export_row(location: Location) -> dict[str, Any]:
+    """Flatten a Location into the export row shape (store #, name, address)."""
+    return {
+        "store_id": location.store_id,
+        "name": location.name,
+        "address": format_address(location.raw_data),
+    }
+
+
+# NOTE: this literal route MUST stay above `/{location_id}` — path-param
+# routes match by registration order, so `/{location_id}` registered first
+# would swallow `/export.xlsx` (and 422 on the int parse).
+@router.get("/export.xlsx")
+async def export_locations(
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+    q: Annotated[str | None, Query(description="Same free-text filter as the list.")] = None,
+    rating: Annotated[str | None, Query(description="Same rating filter as the list.")] = None,
+) -> Response:
+    """Download locations as an .xlsx (respecting the q/rating filters).
+
+    No pagination — a full export of what the filters select. Brenk runs
+    ~180 facilities, so this is a small, one-shot query.
+    """
+    filters = []
+    if rating is not None:
+        filters.append(Location.rating == rating)
+    if q is not None and q.strip():
+        needle = f"%{q.strip()}%"
+        filters.append(
+            or_(
+                Location.name.ilike(needle),
+                Location.store_id.ilike(needle),
+                Location.region.ilike(needle),
+                Location.district.ilike(needle),
+                Location.district_manager_name.ilike(needle),
+            )
+        )
+
+    stmt = select(Location).order_by(
+        Location.store_id.asc().nullslast(), Location.name.asc(), Location.id.asc()
+    )
+    if filters:
+        stmt = stmt.where(*filters)
+    locations = list((await db.execute(stmt)).scalars().all())
+
+    rows = [_export_row(loc) for loc in locations]
+    content = build_locations_workbook(rows)
+
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d")
+    filename = f"brenk-locations-{stamp}.xlsx"
+    return Response(
+        content=content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{location_id}", response_model=LocationDetail)

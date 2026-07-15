@@ -213,6 +213,66 @@ async def test_work_orders_endpoint_404_for_unknown_location(
     assert response.status_code == 404
 
 
+# -----------------------------------------------------------------------------
+# Excel export
+# -----------------------------------------------------------------------------
+
+
+async def test_export_xlsx_streams_workbook(client: httpx.AsyncClient, seed: SeedFn) -> None:
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    await seed(
+        store_id="ZZZ-XLS",
+        name="Export Location",
+        raw_data={"Address1": "1 Main St", "City": "Austin", "State": "TX", "Zip": "78701"},
+    )
+
+    resp = await client.get("/api/v1/locations/export.xlsx", params={"q": "ZZZ-XLS"})
+    assert resp.status_code == 200, resp.text
+    assert (
+        resp.headers["content-type"]
+        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert "attachment" in resp.headers["content-disposition"]
+    assert ".xlsx" in resp.headers["content-disposition"]
+
+    wb = load_workbook(BytesIO(resp.content))
+    ws = wb.active
+    header = [c.value for c in ws[1]]
+    assert header == ["Store #", "Name", "Address"]
+    # Filtered to just our seeded row.
+    rows = [[c.value for c in r] for r in ws.iter_rows(min_row=2)]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row[header.index("Store #")] == "ZZZ-XLS"
+    assert row[header.index("Name")] == "Export Location"
+    assert row[header.index("Address")] == "1 Main St, Austin, TX 78701"
+
+
+async def test_export_xlsx_respects_rating_filter(
+    client: httpx.AsyncClient, seed: SeedFn
+) -> None:
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    await seed(store_id="ZZZ-XP", rating="problem")
+    await seed(store_id="ZZZ-XG", rating="good")
+
+    resp = await client.get("/api/v1/locations/export.xlsx", params={"rating": "problem"})
+    assert resp.status_code == 200
+    ws = load_workbook(BytesIO(resp.content)).active
+    header = [c.value for c in ws[1]]
+    stores = {
+        r[header.index("Store #")]
+        for r in ([c.value for c in row] for row in ws.iter_rows(min_row=2))
+    }
+    assert "ZZZ-XP" in stores
+    assert "ZZZ-XG" not in stores
+
+
 async def test_detail_404(client: httpx.AsyncClient) -> None:
     response = await client.get("/api/v1/locations/999999999")
     assert response.status_code == 404
