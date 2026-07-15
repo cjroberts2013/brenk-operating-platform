@@ -487,6 +487,31 @@ campaign approval (live test, STOP round-trip), then Phase 2 vendor
 reply forwarding (Twilio inbound webhook -> forward vendor replies to
 Daryl; closes the "replies go nowhere" gap).
 
+**Twilio messaging status (2026-07-15): PIVOTED to toll-free — in review.**
+The Business Profile (LLC) was approved, but the 10DLC campaign kept
+failing carrier CTA review (error 30909 — "can't verify how end users
+consent"). Root cause is structural, not content: our opt-in is
+verbal/offline to a private list of known subcontractors, which standard
+10DLC CTA review (built for verifiable web/keyword opt-in) won't accept
+no matter how well worded. So we abandoned 10DLC and bought a **toll-free
+number, +18555144246 (SMS+MMS verified)**, and submitted **toll-free
+verification** (2026-07-15, now in review — lighter review, friendlier to
+offline-consent B2B). Supporting work shipped: a public **`/sms-consent`
+opt-in workflow page** (`app/marketing/sms-consent/page.tsx`, in
+STOREFRONT_ROUTES, cross-linked from /sms-terms) built specifically as
+the "Opt-in policy proof" artifact — it documents the exact consent point
++ verbatim consent statement, the thing 10DLC kept rejecting. Form
+answers used: Account Notifications use case, Verbal opt-in, company type
+**Private profit** (the dropdown had no "LLC" option; LLC = private
+for-profit), proof URLs = /sms-consent + /sms-terms, +/privacy +
+/sms-terms for the T&C/privacy fields. **ON APPROVAL (queued go-live):**
+(1) swap `TWILIO_FROM_NUMBER` to `+18555144246` in dev `.env` AND
+`fly secrets set TWILIO_FROM_NUMBER=+18555144246 -a brenk-platform-web`;
+(2) live test text + MMS to Charles's phone; (3) STOP/START round-trip;
+(4) set `DISPATCH_RECEIPT_TO_PHONE` (Charles first, then Daryl). The old
+512 local number (+15127780725) stays on the account but is unused once
+swapped. Then Phase 2 (inbound reply forwarding) remains the next build.
+
 **Completed (2026-07-07, dev): customer-unit access flag ("call ahead").**
 Daryl's pain point: work inside a tenant's unit needs the tenant there
 with a key; the signal is in the WO description at creation or arrives
