@@ -487,6 +487,20 @@ campaign approval (live test, STOP round-trip), then Phase 2 vendor
 reply forwarding (Twilio inbound webhook -> forward vendor replies to
 Daryl; closes the "replies go nowhere" gap).
 
+**Twilio messaging status (2026-07-16): TOLL-FREE APPROVED — SMS LIVE IN
+PROD.** Toll-free verification for +18555144246 (Brenk Facility Services,
+LLC) approved 2026-07-16. Go-live done 2026-07-20: `TWILIO_FROM_NUMBER`
+swapped to `+18555144246` in dev `.env` + `brenk-platform-web` Fly secret;
+`DISPATCH_RECEIPT_TO_PHONE` set to +19796180950 (Charles's cell) in the
+same prod secret pass; live SMS+MMS test to Charles's phone came back
+Twilio `status=delivered` (photo attached). So vendor texts + dispatch
+receipts are now live in prod from the toll-free number. Remaining: (a)
+STOP/START opt-out round-trip (optional sanity check); (b) once Charles
+trusts the receipt trail, `fly secrets set DISPATCH_RECEIPT_TO_PHONE=`
+Daryl's cell; (c) Phase 2 inbound reply forwarding (Twilio inbound webhook
+→ forward vendor replies to Daryl) is the next build. Old 512 number
++15127780725 stays on the account, unused. History below.
+
 **Twilio messaging status (2026-07-15): PIVOTED to toll-free — in review.**
 The Business Profile (LLC) was approved, but the 10DLC campaign kept
 failing carrier CTA review (error 30909 — "can't verify how end users
