@@ -497,9 +497,26 @@ Twilio `status=delivered` (photo attached). So vendor texts + dispatch
 receipts are now live in prod from the toll-free number. Remaining: (a)
 STOP/START opt-out round-trip (optional sanity check); (b) once Charles
 trusts the receipt trail, `fly secrets set DISPATCH_RECEIPT_TO_PHONE=`
-Daryl's cell; (c) Phase 2 inbound reply forwarding (Twilio inbound webhook
-→ forward vendor replies to Daryl) is the next build. Old 512 number
-+15127780725 stays on the account, unused. History below.
+Daryl's cell. Old 512 number +15127780725 stays on the account, unused.
+History below.
+
+**Phase 2 vendor reply forwarding — SHIPPED to prod 2026-07-20.** Inbound
+Twilio webhook `POST /api/v1/webhooks/twilio` (public router, X-Twilio-
+Signature verified via `app/services/twilio_webhook.py`, HMAC-SHA1, no SDK).
+A vendor texting the toll-free number → forwarded to `VENDOR_REPLY_TO_PHONE`
+(+19796180950, Charles first) with vendor + most-recently-notified-WO
+context; a STOP/opt-out reply sends a DISTINCT alert instead (so Daryl
+knows Twilio blocked that vendor and must reach them another way). Every
+inbound logged to new `sms_replies` table (migration c7e2a1b4d9f0, RLS on;
+idempotent on MessageSid). Text-only (media counted, not relayed).
+`app/services/sms_inbound.py` = opt-out classification + message shapes.
+Form parsed from raw bytes (no python-multipart dep). Live config: fly
+secrets VENDOR_REPLY_TO_PHONE + TWILIO_WEBHOOK_URL set on brenk-platform-web;
+toll-free number's inbound SmsUrl → the endpoint (POST). 338 backend tests
+pass. OPEN QUESTION to verify with a real STOP: does Twilio forward inbound
+STOP to our webhook, or swallow it at the carrier level? If swallowed, the
+opt-out alert won't fire — fallback would be detecting Twilio error 21610
+on the next outbound send. The live STOP/START test answers this.
 
 **Twilio messaging status (2026-07-15): PIVOTED to toll-free — in review.**
 The Business Profile (LLC) was approved, but the 10DLC campaign kept
