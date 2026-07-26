@@ -22,20 +22,34 @@ in the next slice; rows land here as `status='pending'`.
 import hashlib
 import json
 from typing import Annotated
+from urllib.parse import parse_qsl
 
 import structlog
 from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.db.session import get_async_db
 from app.models.invoice import WebhookEvent
+from app.models.work_order import SmsReply, Vendor, WorkOrder, WoVendorAssignment
 from app.services.sc_webhook import verify_signature
+from app.services.sms import normalize_phone, send_sms
+from app.services.sms_inbound import (
+    compose_opt_out_alert,
+    compose_reply_forward,
+    is_opt_out,
+)
+from app.services.twilio_webhook import verify_twilio_signature
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+# Empty TwiML — tells Twilio "received, don't auto-reply to the sender".
+_TWIML_EMPTY = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
 
 
 def _ack() -> Response:
@@ -134,3 +148,151 @@ async def receive_sc_webhook(
     # NOTE: the Procrastinate defer of process_webhook_event(id) is wired
     # in the next slice; the periodic sweep also picks up pending rows.
     return _ack()
+
+
+# --------------------------------------------------------------------------- #
+# Twilio inbound SMS — vendor replies to our toll-free number
+# --------------------------------------------------------------------------- #
+
+
+def _twiml() -> Response:
+    return Response(content=_TWIML_EMPTY, media_type="application/xml", status_code=200)
+
+
+async def _match_vendor(db: AsyncSession, from_number: str) -> Vendor | None:
+    """Find the vendor whose phone matches the inbound number (E.164 compare).
+
+    Vendor phones are hand-entered in varied formats, so we normalize both
+    sides in Python. At ~20 active vendors this one small query is cheap.
+    """
+    normalized_from = normalize_phone(from_number)
+    if normalized_from is None:
+        return None
+    vendors = (await db.execute(select(Vendor).where(Vendor.phone.is_not(None)))).scalars().all()
+    for v in vendors:
+        if normalize_phone(v.phone) == normalized_from:
+            return v
+    return None
+
+
+async def _recent_notified_wo(db: AsyncSession, vendor_id: int):
+    """The vendor's most recently-notified work order — best-effort context
+    for "which job is this reply about". Returns (wo_number, location) or
+    (None, None)."""
+    stmt = (
+        select(WorkOrder)
+        .join(WoVendorAssignment, WoVendorAssignment.work_order_id == WorkOrder.id)
+        .options(selectinload(WorkOrder.location))
+        .where(WoVendorAssignment.vendor_id == vendor_id)
+        .where(WoVendorAssignment.notified_at.is_not(None))
+        .order_by(WoVendorAssignment.notified_at.desc())
+        .limit(1)
+    )
+    wo = (await db.execute(stmt)).scalar_one_or_none()
+    if wo is None:
+        return None, None
+    loc = wo.location
+    location = None
+    if loc is not None:
+        location = " ".join(p for p in [loc.store_id, loc.name] if p) or None
+    return wo.sc_number, location
+
+
+@router.post("/twilio")
+async def receive_twilio_sms(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> Response:
+    """Inbound vendor SMS reply. Verify Twilio's signature, log the reply
+    (history), and forward it to VENDOR_REPLY_TO_PHONE — a distinct alert if
+    it's an opt-out (STOP). Text-only; media is noted, not relayed.
+
+    Always returns empty TwiML so Twilio never auto-replies to the vendor.
+    403 on a bad/missing signature.
+    """
+    settings = get_settings()
+    # Twilio posts application/x-www-form-urlencoded. Parse the raw body
+    # directly (avoids a python-multipart dependency); parse_qsl decodes the
+    # values, matching what Twilio signed over.
+    raw = await request.body()
+    params = dict(parse_qsl(raw.decode("utf-8"), keep_blank_values=True))
+
+    # Validate against the exact URL Twilio was configured with (behind Fly's
+    # proxy `request.url` is the internal http URL, which wouldn't match).
+    url = settings.TWILIO_WEBHOOK_URL or str(request.url)
+    signature = request.headers.get("X-Twilio-Signature")
+    if not verify_twilio_signature(
+        url=url,
+        params=params,
+        auth_token=settings.TWILIO_AUTH_TOKEN,
+        signature=signature,
+    ):
+        logger.warning("twilio_webhook_invalid_signature", from_number=params.get("From"))
+        return Response(content="invalid signature", status_code=403)
+
+    from_number = params.get("From", "")
+    body = params.get("Body", "")
+    message_sid = params.get("MessageSid") or params.get("SmsSid")
+    try:
+        num_media = int(params.get("NumMedia", "0"))
+    except ValueError:
+        num_media = 0
+
+    vendor = await _match_vendor(db, from_number)
+    opt_out = is_opt_out(body)
+
+    wo_number = location = None
+    if vendor is not None and not opt_out:
+        wo_number, location = await _recent_notified_wo(db, vendor.id)
+
+    # Forward (best-effort) to the operator's phone.
+    forwarded = False
+    reply_to = normalize_phone(settings.VENDOR_REPLY_TO_PHONE)
+    if reply_to is not None:
+        if opt_out:
+            text = compose_opt_out_alert(
+                vendor_name=vendor.name if vendor else None, from_number=from_number
+            )
+        else:
+            text = compose_reply_forward(
+                vendor_name=vendor.name if vendor else None,
+                from_number=from_number,
+                body=body,
+                wo_number=wo_number,
+                location=location,
+            )
+        try:
+            forwarded = await send_sms(to=reply_to, body=text)
+        except Exception as exc:  # a failed forward must not fail the webhook
+            logger.warning("twilio_reply_forward_failed", error=str(exc))
+
+    # Log the reply (history). Idempotent on the Twilio MessageSid so a
+    # Twilio retry doesn't double-insert.
+    values = {
+        "twilio_message_sid": message_sid,
+        "from_number": from_number,
+        "body": body or None,
+        "num_media": num_media,
+        "vendor_id": vendor.id if vendor else None,
+        "is_opt_out": opt_out,
+        "forwarded": forwarded,
+    }
+    if message_sid:
+        await db.execute(
+            pg_insert(SmsReply)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["twilio_message_sid"])
+        )
+    else:
+        await db.execute(pg_insert(SmsReply).values(**values))
+    await db.commit()
+
+    logger.info(
+        "twilio_sms_received",
+        from_number=from_number,
+        vendor_id=vendor.id if vendor else None,
+        opt_out=opt_out,
+        forwarded=forwarded,
+        num_media=num_media,
+    )
+    return _twiml()

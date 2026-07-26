@@ -251,9 +251,7 @@ async def test_export_xlsx_streams_workbook(client: httpx.AsyncClient, seed: See
     assert row[header.index("Address")] == "1 Main St, Austin, TX 78701"
 
 
-async def test_export_xlsx_respects_rating_filter(
-    client: httpx.AsyncClient, seed: SeedFn
-) -> None:
+async def test_export_xlsx_respects_rating_filter(client: httpx.AsyncClient, seed: SeedFn) -> None:
     from io import BytesIO
 
     from openpyxl import load_workbook

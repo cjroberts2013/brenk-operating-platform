@@ -151,6 +151,18 @@ class Settings(BaseSettings):
     # vendor, channel, and which signed-in operator sent it — so Daryl keeps
     # a text trail even when someone else runs the platform. Empty = off.
     DISPATCH_RECEIPT_TO_PHONE: str = ""
+    # Where inbound vendor SMS replies are forwarded (E.164). When a vendor
+    # texts our toll-free number back ("can be there at 2pm"), we forward it
+    # here so the reply doesn't die in the Twilio console. A STOP/opt-out
+    # reply forwards a distinct alert instead. Empty = forwarding off.
+    # Points at Charles's cell first, then Daryl's once trusted.
+    VENDOR_REPLY_TO_PHONE: str = ""
+    # The exact public URL Twilio is configured to POST inbound messages to.
+    # Twilio signs each request over this URL + params, so validation must
+    # use the same string Twilio used (behind Fly's proxy `request.url` is
+    # the internal http URL, which wouldn't match). Empty = fall back to the
+    # reconstructed request URL (fine for local testing).
+    TWILIO_WEBHOOK_URL: str = ""
 
     # -------------------------------------------------------------------------
     # Dashboard — public base URL of the authenticated frontend, used to

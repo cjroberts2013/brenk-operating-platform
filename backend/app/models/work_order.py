@@ -572,3 +572,37 @@ class WorkOrderStatusHistory(Base):
         return (
             f"<StatusHistory wo={self.work_order_id} {self.primary_status}/{self.extended_status}>"
         )
+
+
+class SmsReply(Base):
+    """An inbound SMS a vendor sent to our toll-free number — the cheap
+    history behind reply forwarding.
+
+    Append-only. Every inbound webhook delivery lands one row (after
+    signature check), whether or not the sender maps to a known vendor.
+    `vendor_id`/`work_order_id` are the best-effort match + context guess at
+    receipt time (nullable). `is_opt_out` flags a STOP-type reply.
+    """
+
+    __tablename__ = "sms_replies"
+    __table_args__ = (Index("ix_sms_replies_vendor_id", "vendor_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    twilio_message_sid: Mapped[str | None] = mapped_column(String(64), unique=True)
+    from_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    num_media: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    vendor_id: Mapped[int | None] = mapped_column(ForeignKey("vendors.id", ondelete="SET NULL"))
+    work_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_orders.id", ondelete="SET NULL")
+    )
+    is_opt_out: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    forwarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default="now()", nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<SmsReply from={self.from_number} vendor={self.vendor_id} opt_out={self.is_opt_out}>"
+        )
