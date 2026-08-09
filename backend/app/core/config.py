@@ -165,6 +165,27 @@ class Settings(BaseSettings):
     TWILIO_WEBHOOK_URL: str = ""
 
     # -------------------------------------------------------------------------
+    # Worker reliability guards. The Procrastinate worker can wedge silently
+    # (dropped Postgres LISTEN/NOTIFY) — process stays "up" but stops
+    # scheduling periodic tasks, so Fly never restarts it. These make that
+    # self-heal + get surfaced.
+    #   WORKER_WATCHDOG: when true (set only on the worker via fly.worker.toml),
+    #     start an in-process watchdog thread that force-exits the process if
+    #     the heartbeat goes stale, so Fly's restart-on-exit kicks in.
+    #   WORKER_HEARTBEAT_FILE: the per-minute heartbeat the worker_heartbeat
+    #     task touches and the watchdog reads.
+    #   WORKER_STALL_SECONDS: heartbeat age past which the watchdog restarts
+    #     the worker (default 10 min = ~10 missed per-minute beats).
+    #   SYNC_FRESHNESS_MAX_SECONDS: age of the newest work_orders.last_synced_at
+    #     past which /health/sync-freshness reports unhealthy (default 3h,
+    #     comfortably above the hourly sync cadence).
+    # -------------------------------------------------------------------------
+    WORKER_WATCHDOG: bool = False
+    WORKER_HEARTBEAT_FILE: str = "/tmp/brenk_worker_heartbeat"
+    WORKER_STALL_SECONDS: int = 600
+    SYNC_FRESHNESS_MAX_SECONDS: int = 10800
+
+    # -------------------------------------------------------------------------
     # Dashboard — public base URL of the authenticated frontend, used to
     # build "open this WO" links in outbound emails.
     # -------------------------------------------------------------------------

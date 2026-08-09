@@ -33,3 +33,10 @@ procrastinate_app = App(
     connector=PsycopgConnector(conninfo=_db_url),
     import_paths=["app.workers.tasks"],
 )
+
+# Start the self-heal watchdog when running as the worker (gated on
+# WORKER_WATCHDOG, set only in fly.worker.toml). No-op on import from the
+# web app or tests. See app/workers/watchdog.py for the rationale.
+from app.workers.watchdog import start_watchdog  # noqa: E402
+
+start_watchdog()

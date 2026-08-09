@@ -17,6 +17,11 @@ primary_region = "dfw"
 
 [env]
   APP_ENV = "production"
+  # Start the in-process self-heal watchdog (app/workers/watchdog.py): if
+  # the periodic scheduler wedges, the heartbeat goes stale and the
+  # watchdog force-exits so Fly restarts this machine. Only the worker
+  # sets this — the web app / tests never spawn the thread.
+  WORKER_WATCHDOG = "1"
   # Force /app onto sys.path so any subprocess (procrastinate CLI
   # in particular) can import the `app` package regardless of cwd.
   # The editable install (`pip install -e .`) registers an

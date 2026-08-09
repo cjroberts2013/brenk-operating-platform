@@ -73,6 +73,22 @@ async def sync_work_order_detail(sc_work_order_id: int) -> dict:
 
 
 @procrastinate_app.periodic(cron="* * * * *")
+@procrastinate_app.task(name="worker_heartbeat", queue="default")
+async def worker_heartbeat(timestamp: int) -> dict:
+    """Liveness beat for the self-heal watchdog. Runs every minute; if the
+    periodic scheduler wedges this stops firing, the heartbeat file goes
+    stale, and the watchdog thread force-exits so Fly restarts the worker.
+    See app/workers/watchdog.py.
+
+    `timestamp` is the Procrastinate scheduled tick (used for logging).
+    """
+    from app.workers.watchdog import write_heartbeat
+
+    write_heartbeat()
+    return {"beat_at": timestamp}
+
+
+@procrastinate_app.periodic(cron="* * * * *")
 @procrastinate_app.task(name="sweep_webhook_events", queue="default")
 async def sweep_webhook_events(timestamp: int) -> dict:
     """Process any pending SC webhook events into invoice state.

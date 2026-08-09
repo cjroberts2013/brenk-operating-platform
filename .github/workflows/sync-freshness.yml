@@ -1,0 +1,36 @@
+name: Worker sync-freshness watch
+
+# External dead-man's-switch for the Procrastinate worker. It polls the
+# public /health/sync-freshness endpoint; that endpoint returns 503 when
+# the worker's hourly WO sync has gone stale (a silent worker stall). A
+# failed run here emails the repo owner via GitHub's default notifications
+# for failed scheduled workflows — turning a silent multi-week outage into
+# a same-day alert. Runs OUTSIDE Fly on purpose, so it still fires when the
+# worker (and even the whole Fly app) is down.
+#
+# No secrets required — the endpoint is public and returns only a timestamp
+# + boolean. The in-process watchdog (app/workers/watchdog.py) handles
+# auto-restart; this is the human-notification safety net on top.
+
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly, offset off the top of the hour
+  workflow_dispatch: {} # allow a manual run from the Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll sync-freshness endpoint
+        run: |
+          URL="https://brenk-platform-web.fly.dev/health/sync-freshness"
+          echo "Checking $URL"
+          code=$(curl -sS -o body.json -w "%{http_code}" --max-time 30 "$URL" || echo "000")
+          echo "HTTP $code"
+          cat body.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Worker sync is STALE or unreachable (HTTP $code). The Procrastinate worker may be wedged — check brenk-platform-worker (fly machine restart) and see app/workers/watchdog.py."
+            exit 1
+          fi
+          echo "Sync is fresh."

@@ -575,6 +575,46 @@ DAYS LATER as a store-manager note, and missing it = wasted trip.
   paid/notified shape). Dev backfill: 1 real hit, 0 false positives
   over 75 open WOs.
 
+**Worker reliability incident + guards (2026-08-09).** The Procrastinate
+worker (`brenk-platform-worker`) silently stopped running ALL periodic
+tasks for ~18 days: the machine stayed "started" but the periodic
+scheduler wedged (almost certainly a dropped Postgres LISTEN/NOTIFY
+connection through Supabase's session pooler that never reconnected).
+Because the process never exited, Fly's restart-on-crash never fired and
+there was no health check to catch a stall. Everything on the worker
+stopped together — hourly WO sync, AI categorization, the daily deadline
+digest, and the invoice webhook sweep. Symptoms Charles noticed: no new
+WOs synced in 18 days (manual "Sync now" on the web app still worked —
+that runs in the web process, not the worker) and a new WO had no AI
+category. **Fix:** `fly machine restart` revived it (all 4 periodic tasks
+re-registered + firing); the 26-WO categorization backlog was cleared via
+`scripts/backfill_categories.py .env.production` (run with the dev
+GEMINI key since prod's is a Fly secret only).
+**Durable guards shipped the same day:**
+- *Self-heal watchdog* (`app/workers/watchdog.py`): a per-minute
+  `worker_heartbeat` periodic task touches a heartbeat file; an
+  independent watchdog daemon thread `os._exit(1)`s the process if the
+  heartbeat goes stale (default 10 min), so Fly's restart-on-exit brings
+  it back. Gated by `WORKER_WATCHDOG=1` (set only in fly.worker.toml, so
+  web/tests never spawn the thread). Relies on the machine's default
+  restart-on-exit.
+- *External dead-man's-switch*: public `GET /health/sync-freshness` on the
+  web app returns 503 when the newest `work_orders.last_synced_at` is
+  older than `SYNC_FRESHNESS_MAX_SECONDS` (default 3h); a GitHub Actions
+  cron (`.github/workflows/sync-freshness.yml`, hourly) polls it and a
+  failed run emails Charles — turns a silent multi-week outage into a
+  same-day alert. External to Fly on purpose (fires even if the whole app
+  is down); no secrets needed.
+- Settings: `WORKER_WATCHDOG`, `WORKER_HEARTBEAT_FILE`,
+  `WORKER_STALL_SECONDS`, `SYNC_FRESHNESS_MAX_SECONDS`. Pure logic
+  (`app/services/health.py` + watchdog heartbeat) unit-tested (9 tests).
+- KNOWN RECURRING NUISANCE: the DEV Supabase pooler intermittently
+  returns "tenant/user postgres.<ref> not found" (flaps after a resume);
+  it blocks dev integration tests until it settles. Prod is unaffected.
+- Also confirmed this session: inbound STOP DOES reach the Twilio webhook
+  (the Phase 2 open question) — so the opt-out alert fires in prod; no
+  21610-on-send fallback needed.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)
