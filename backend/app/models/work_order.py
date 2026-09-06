@@ -445,6 +445,14 @@ class WorkOrder(Base, TimestampMixin):
     # mode. Null = not yet notified. SC has no equivalent.
     brenk_vendor_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Set when SC returns 404 for this WO during the sync's reconcile pass —
+    # the WO was deleted/voided in SC and no longer exists there, so its
+    # local status is frozen and meaningless. We keep the row (history) but
+    # exclude it from deadline/at-risk tracking so it stops showing as a
+    # phantom "overdue". Self-clearing: any later successful upsert (the WO
+    # reappeared in SC) resets it to NULL.
+    brenk_sc_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Customer-unit access flag ("call ahead — tenant must be there with a
     # key"). Auto-detected by scanning the description + UsersNote notes
     # (app/services/access_flags.py); the snippet is the matched excerpt

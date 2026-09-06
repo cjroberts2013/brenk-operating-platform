@@ -615,6 +615,37 @@ GEMINI key since prod's is a Fly secret only).
   (the Phase 2 open question) — so the opt-out alert fires in prod; no
   21610-on-send fallback needed.
 
+**Stale-status bug fix — completed WOs showing as "overdue" (2026-09-06).**
+Daryl saw WOs labeled ~180 days overdue that were COMPLETED in SC. Root
+cause: SC's `/v3/workorders` LIST feed only returns *active* WOs — once a
+WO completes it silently drops off the list, so the full-sweep sync never
+sees the completion and the local copy stays frozen at its last active
+status (e.g. IN PROGRESS/DISPATCH CONFIRMED) forever. Prod probe confirmed:
+98 local OPEN/IN PROGRESS WOs, the oldest 8 all actually COMPLETED in SC
+with last_synced frozen in May–June.
+- **Fix — reconcile pass in `sync_all_work_orders`** (`app/services/sync/
+  work_orders.py`): after the list sweep, any non-terminal WO whose
+  `last_synced_at` the sweep didn't bump (SC didn't return it → dropped
+  → likely completed) is re-fetched individually via
+  `GET /v3/workorders/{id}` (which DOES return completed WOs) and upserted.
+  Cap 200/tick, ordered stalest-first. Validated on PROD: 23 reconciled,
+  all 8 known-stale → COMPLETED, 0 stale-completed remaining. OPEN/IN
+  PROGRESS 98 → 79.
+- **SC-deleted WOs** (4 found — 404 on the individual GET, gone from SC
+  entirely, were phantom-overdue): reconcile marks them
+  `brenk_sc_deleted_at` (migration `d4a9f1c2b8e3`, nullable col);
+  `deadlines.deadline_filter_clauses` + the WO-list badge enrichment now
+  exclude marked WOs, so they drop out of overdue/at-risk/digest.
+  Self-healing — any later successful upsert clears the marker
+  (upsert_work_order). Reconcile candidate query skips already-marked WOs
+  so a purged WO isn't re-404'd every tick.
+- Of the 63 still overdue after the fix, 59 are GENUINELY open in SC (real
+  aged work, mostly WAITING FOR APPROVAL — correct to show); the 4 deleted
+  get marked on the next prod sync post-deploy.
+- 3 reconcile integration tests written; couldn't run (dev Supabase pooler
+  persistently down this session) — 220 unit tests pass, core validated on
+  prod. Run the integration trio when dev recovers.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)

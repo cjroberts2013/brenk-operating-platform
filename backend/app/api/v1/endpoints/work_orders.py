@@ -198,7 +198,7 @@ def _apply_deadline_fields(
     schema, using the same definitions as the ?deadline= filter and the
     dashboard's Deadline watch counts. No-op (fields stay None) once
     the work is complete — the turnaround clock has stopped."""
-    if not is_at_risk_status(wo.primary_status):
+    if not is_at_risk_status(wo.primary_status) or wo.brenk_sc_deleted_at is not None:
         return
     dl = deadline_for(wo.scheduled_date, wo.call_date)
     if dl is None:

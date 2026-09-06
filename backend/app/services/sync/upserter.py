@@ -189,6 +189,9 @@ async def upsert_work_order(session: AsyncSession, payload: dict[str, Any]) -> W
     existing.location_id = location.id
     existing.trade_id = trade.id if trade else None
     existing.last_synced_at = datetime.now(UTC)
+    # SC returned this WO, so it isn't deleted — clear any stale marker set
+    # by a prior reconcile 404 (self-healing if a WO reappears in SC).
+    existing.brenk_sc_deleted_at = None
     for key, value in fields.items():
         setattr(existing, key, value)
     apply_description_flag(existing)

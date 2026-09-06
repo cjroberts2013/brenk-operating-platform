@@ -149,6 +149,9 @@ def deadline_filter_clauses(key: str) -> list[ColumnElement[bool]]:
 
     base: list[ColumnElement[bool]] = [
         WorkOrder.primary_status.in_(AT_RISK_PRIMARY_STATUSES),
+        # Exclude WOs deleted in SC (reconcile marked them) — their local
+        # status is frozen and meaningless; they were phantom "overdue".
+        WorkOrder.brenk_sc_deleted_at.is_(None),
         # Explicit guard: a WO with neither date has no deadline. The
         # NULL COALESCE would exclude it anyway; this documents intent.
         or_(
