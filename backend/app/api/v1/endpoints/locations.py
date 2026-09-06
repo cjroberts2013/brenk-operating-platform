@@ -319,7 +319,11 @@ async def list_location_work_orders(
             row.extended_status,
             row.assigned_vendor_id is not None,
         )
-        summary.is_stuck = is_stuck(stage_key, row.sc_updated_date) if stage_key else False
+        summary.is_stuck = (
+            is_stuck(stage_key, row.sc_updated_date)
+            if stage_key and row.brenk_sc_deleted_at is None
+            else False
+        )
         items.append(summary)
 
     return WorkOrderListResponse(items=items, total=total, page=page, page_size=page_size)

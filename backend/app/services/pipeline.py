@@ -83,19 +83,25 @@ STAGES: tuple[StageSpec, ...] = (
         icon="user",
         stuck_days=3,
     ),
+    # The two COMPLETED stages are NOT stuck-eligible (stuck_days=None): a
+    # WO "marked completed" in SC should never appear in the dashboard's
+    # "Stuck right now" panel (per Daryl, 2026-09-06). The completed →
+    # invoice workflow is owned by the Invoices page (its own tabs +
+    # aging), not the pipeline-stall panel, which now focuses on
+    # pre-completion stalls (pending acceptance, dispatched).
     StageSpec(
         key="work_complete",
         label="Work complete · awaiting store",
         color="orange",
         icon=None,
-        stuck_days=7,
+        stuck_days=None,
     ),
     StageSpec(
         key="ready_to_invoice",
         label="Ready to invoice",
         color="green",
         icon="money",
-        stuck_days=3,
+        stuck_days=None,
     ),
     StageSpec(
         key="invoiced",
@@ -223,6 +229,9 @@ def stuck_filter_clause() -> ColumnElement[bool]:
         per_stage.append(
             and_(
                 *stage_filter_clauses(spec.key),
+                # WOs deleted in SC (sync marked them) are gone upstream —
+                # never surface them as stuck.
+                WorkOrder.brenk_sc_deleted_at.is_(None),
                 WorkOrder.sc_updated_date.is_not(None),
                 WorkOrder.sc_updated_date < cutoff,
             )

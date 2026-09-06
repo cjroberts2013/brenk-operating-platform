@@ -64,7 +64,12 @@ async def get_pipeline(
     rows = (
         (
             await session.execute(
-                select(WorkOrder).options(
+                # Exclude WOs deleted in SC (sync marked them) — they no
+                # longer exist upstream, so they don't belong in any tile,
+                # the stuck panel, or the deadline watch.
+                select(WorkOrder)
+                .where(WorkOrder.brenk_sc_deleted_at.is_(None))
+                .options(
                     joinedload(WorkOrder.trade),
                     joinedload(WorkOrder.location),
                     joinedload(WorkOrder.assigned_vendor),

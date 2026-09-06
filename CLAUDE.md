@@ -646,6 +646,28 @@ with last_synced frozen in May–June.
   persistently down this session) — 220 unit tests pass, core validated on
   prod. Run the integration trio when dev recovers.
 
+**Two follow-on fixes (2026-09-06, same session):**
+- **Trade-upsert UniqueViolation** (the persistent 1-per-sync error;
+  WO 362604021): SC trade ids are CLIENT-SCOPED — the same trade name
+  carries a different `TradeId` per subscriber (ELECTRICAL is 87448 for
+  CubeSmart, 154389 for Galls, LLC, a new client Brenk started taking
+  work from). `upsert_trade` looked up by sc_trade_id only, then tried to
+  INSERT a second ELECTRICAL row → violated `trades.name` UNIQUE every
+  sync. Fix: fall back to a name lookup before inserting, and NEVER
+  overwrite an existing sc_trade_id on a name match (only backfill when
+  NULL) so ids don't thrash between clients. Validated on prod (WO
+  362604021 upserts clean; one ELECTRICAL row). This WO had been missing
+  entirely (never synced due to the error) — it's COMPLETED in SC.
+- **Completed WOs no longer show in "Stuck right now"** (Daryl request):
+  the two COMPLETED pipeline stages (work_complete, ready_to_invoice) set
+  to `stuck_days=None`, so a completed WO never appears in the dashboard
+  stall panel — the completed→invoice workflow is owned by the Invoices
+  page (its own tabs). NOTE: this drops the dashboard's "Sue forgot to
+  invoice" + "store forgot to confirm" stall signals; those now live only
+  on the Invoices page. Also excluded `brenk_sc_deleted_at` WOs from the
+  whole dashboard query, the stuck clause, and the WO/location list stuck
+  badges. 3 stuck unit tests + prior 220 pass.
+
 Live URLs:
 - Dashboard: https://app.brenkfacilityservices.com/
 - Storefront: https://brenkfacilityservices.com/ (also `www.`)

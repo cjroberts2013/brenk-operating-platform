@@ -57,17 +57,33 @@ async def upsert_trade(session: AsyncSession, payload: dict[str, Any]) -> Trade 
     """Get-or-create a Trade row from a work order payload.
 
     Returns None if the payload has neither a Trade name nor a TradeId.
-    Prefers sc_trade_id for lookup (numeric, stable), falls back to name.
+
+    SC trade ids are CLIENT-SCOPED: the same trade name legitimately carries
+    a different `TradeId` per subscriber (e.g. ELECTRICAL is 87448 for
+    CubeSmart but 154389 for Galls, LLC). Brenk keys trades by NAME — one
+    markup default per trade name — and `trades.name` is UNIQUE. So we look
+    up by sc_trade_id first, then FALL BACK to name before inserting;
+    without that fallback a second client using an existing trade name
+    tripped a UniqueViolation on every sync (found 2026-09-06, WO 362604021).
     """
     fields = extract_trade_fields(payload)
     if fields is None:
         return None
 
-    if fields.get("sc_trade_id") is not None:
-        stmt = select(Trade).where(Trade.sc_trade_id == fields["sc_trade_id"])
-    else:
-        stmt = select(Trade).where(Trade.name == fields["name"])
-    existing = (await session.execute(stmt)).scalar_one_or_none()
+    sc_trade_id = fields.get("sc_trade_id")
+    name = fields.get("name")
+
+    existing: Trade | None = None
+    matched_by_sc_id = False
+    if sc_trade_id is not None:
+        existing = (
+            await session.execute(select(Trade).where(Trade.sc_trade_id == sc_trade_id))
+        ).scalar_one_or_none()
+        matched_by_sc_id = existing is not None
+    if existing is None and name:
+        existing = (
+            await session.execute(select(Trade).where(Trade.name == name))
+        ).scalar_one_or_none()
 
     if existing is None:
         trade = Trade(**fields)
@@ -75,10 +91,14 @@ async def upsert_trade(session: AsyncSession, payload: dict[str, Any]) -> Trade 
         await session.flush()
         return trade
 
-    if fields.get("name") and existing.name != fields["name"]:
-        existing.name = fields["name"]
-    if fields.get("sc_trade_id") and existing.sc_trade_id != fields["sc_trade_id"]:
-        existing.sc_trade_id = fields["sc_trade_id"]
+    # Matched an existing trade. Only rename on an sc_trade_id match (SC
+    # renamed the trade). NEVER overwrite sc_trade_id on a name match — the
+    # ids differ per client, so overwriting would thrash between clients and
+    # can violate the sc_trade_id unique index. Backfill it only when NULL.
+    if matched_by_sc_id and name and existing.name != name:
+        existing.name = name
+    if existing.sc_trade_id is None and sc_trade_id is not None:
+        existing.sc_trade_id = sc_trade_id
     await session.flush()
     return existing
 
